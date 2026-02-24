@@ -2,8 +2,10 @@
 """Chromatic Census — Main entry point.
 
 Usage:
-    python run.py --mode coarse      # Quick validation run (~2 hours)
-    python run.py --mode fine         # Full census (~2-4 weeks)
+    python run.py --mode coarse      # Quick validation run (~2 minutes)
+    python run.py --mode fine         # Full census (~10 minutes)
+    python run.py --mode superfine   # Convergence test (~37 minutes)
+    python run.py --mode ultrafine   # Deep convergence (~5-10 hours)
     python run.py --resume            # Resume from last checkpoint
     python run.py --status            # Print current status
     python run.py --dashboard-only    # Run dashboard without engine
@@ -24,7 +26,7 @@ import yaml
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Chromatic Census")
-    parser.add_argument("--mode", choices=["coarse", "fine"], default="fine",
+    parser.add_argument("--mode", choices=["coarse", "fine", "superfine", "ultrafine"], default="fine",
                         help="Grid resolution (default: fine)")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from the latest checkpoint")
@@ -51,6 +53,22 @@ def apply_coarse_overrides(config):
     config["grid"]["L_step"] = 1.0
     config["grid"]["a_step"] = 2.0
     config["grid"]["b_step"] = 2.0
+    return config
+
+
+def apply_superfine_overrides(config):
+    """Override grid steps to superfine resolution for convergence testing."""
+    config["grid"]["L_step"] = 0.125
+    config["grid"]["a_step"] = 0.25
+    config["grid"]["b_step"] = 0.25
+    return config
+
+
+def apply_ultrafine_overrides(config):
+    """Override grid steps to ultrafine resolution for deep convergence testing."""
+    config["grid"]["L_step"] = 0.0625
+    config["grid"]["a_step"] = 0.125
+    config["grid"]["b_step"] = 0.125
     return config
 
 
@@ -290,6 +308,10 @@ def main():
 
     if args.mode == "coarse":
         config = apply_coarse_overrides(config)
+    elif args.mode == "superfine":
+        config = apply_superfine_overrides(config)
+    elif args.mode == "ultrafine":
+        config = apply_ultrafine_overrides(config)
 
     if args.status:
         print_status(config)

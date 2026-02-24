@@ -18,15 +18,20 @@ The ratios between tiers are arguably more interesting than the raw counts.
 
 ## Results
 
-| Tier | ΔE2000 | Distinguishable Colors |
-|------|--------|------------------------|
-| **JND** | 1.0 | **1,834,305** |
-| **Acceptability** | 2.0 | **513,715** |
-| **Obvious** | 5.0 | **337,085** |
+Counts increase with grid resolution as finer grids find seeds between previous grid points. Results across four runs:
 
-Not 10 million. About 1.8 million at the theoretical limit of human discrimination — and only ~337,000 that anyone would call obviously different.
+| | Coarse | Fine | Superfine | Ultrafine |
+|---|---|---|---|---|
+| **Grid steps** (L\*/a\*/b\*) | 1.0 / 2.0 / 2.0 | 0.25 / 0.5 / 0.5 | 0.125 / 0.25 / 0.25 | 0.0625 / 0.125 / 0.125 |
+| **Candidates** | ~1.6M | ~104M | ~835M | ~6.7B |
+| **JND** (ΔE=1.0) | 313,115 | 1,834,305 | 3,997,938 | **8,414,939** |
+| **Acceptability** (ΔE=2.0) | 109,032 | 513,715 | 1,063,584 | **2,162,115** |
+| **Obvious** (ΔE=5.0) | 74,463 | 337,085 | 676,635 | **1,358,876** |
+| **Runtime** | ~2 min | ~10 min | ~37 min | ~3.5 hrs |
 
-The JND-to-Obvious ratio of ~5.4:1 means casual perception uses roughly 18% of the eye's theoretical resolving power. The JND-to-Acceptability ratio of ~3.6:1 suggests practical color work needs about 28% of what the hardware can do.
+Counts roughly double with each halving of step size, indicating the grid has not yet fully converged. These are lower bounds — the true counts are somewhat higher.
+
+At 8.4 million JND, the old "10 million" folklore is looking closer than our early runs suggested — though the number was arrived at for the wrong reasons. About 2.2 million meaningfully different colors, and ~1.4 million obviously different to anyone.
 
 ## What's Inside
 
