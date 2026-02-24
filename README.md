@@ -16,10 +16,22 @@ Three perceptual thresholds run simultaneously:
 
 The ratios between tiers are arguably more interesting than the raw counts.
 
+## Results
+
+| Tier | ΔE2000 | Distinguishable Colors |
+|------|--------|------------------------|
+| **JND** | 1.0 | **1,834,305** |
+| **Acceptability** | 2.0 | **513,715** |
+| **Obvious** | 5.0 | **337,085** |
+
+Not 10 million. About 1.8 million at the theoretical limit of human discrimination — and only ~337,000 that anyone would call obviously different.
+
+The JND-to-Obvious ratio of ~5.4:1 means casual perception uses roughly 18% of the eye's theoretical resolving power. The JND-to-Acceptability ratio of ~3.6:1 suggests practical color work needs about 28% of what the hardware can do.
+
 ## What's Inside
 
 - [chromatic-census/](chromatic-census/) — The census engine, dashboard, and deployment config
 
-## Status
+## Dashboard
 
-Currently running on a home server. Check back for results.
+Live results at [http://10.0.0.108:8084/](http://10.0.0.108:8084/)
