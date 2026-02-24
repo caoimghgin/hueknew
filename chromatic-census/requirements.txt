@@ -1,0 +1,10 @@
+numpy>=1.24
+scipy>=1.10
+colorspacious>=1.1
+matplotlib>=3.7
+pyarrow>=12.0
+pyyaml>=6.0
+tqdm>=4.65
+psutil>=5.9
+starlette>=0.36.0
+uvicorn>=0.27.0

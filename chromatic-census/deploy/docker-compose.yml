@@ -1,0 +1,36 @@
+# Chromatic Census — Docker Compose for TrueNAS SCALE (darkstar.acre)
+#
+# Deploy with:
+#   docker compose -f deploy/docker-compose.yml up -d
+
+services:
+  census:
+    image: caoimghgin/census:latest
+    container_name: census
+    restart: on-failure
+
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+        reservations:
+          cpus: "2"
+          memory: 4G
+
+    ports:
+      - "8084:8084"
+
+    volumes:
+      # Output persisted on NAS storage
+      - /mnt/orion/betelgeuse/Applications/census:/app/output
+
+    environment:
+      - PYTHONUNBUFFERED=1
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8084/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
