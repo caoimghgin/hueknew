@@ -187,9 +187,10 @@ def _compute_chain_walk(srgb_seeds):
             visited[idx] = True
         placed += len(batch)
 
-        # Reference = last seed in batch (farthest ΔE from previous ref)
-        last = batch[-1]
-        ref_L, ref_a, ref_b = L[last], a[last], b[last]
+        # Reference = seed in batch closest to target L* (paced dark→light)
+        target_L = (placed / n) * 100.0
+        best = batch[np.argmin(np.abs(L[batch] - target_L))]
+        ref_L, ref_a, ref_b = L[best], a[best], b[best]
 
         if placed % 10000 == 0:
             elapsed = time.monotonic() - t0
