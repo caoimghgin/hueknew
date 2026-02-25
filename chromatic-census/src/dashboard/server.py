@@ -13,6 +13,7 @@ from starlette.routing import Route
 
 from . import api
 from .page import render_dashboard_html
+from .jnd_audit_page import render_jnd_audit_html
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,11 @@ logger = logging.getLogger(__name__)
 async def dashboard_page(request):
     """Serve the main dashboard HTML page."""
     return HTMLResponse(render_dashboard_html())
+
+
+async def jnd_audit_page(request):
+    """Serve the JND Visual Audit HTML page."""
+    return HTMLResponse(render_jnd_audit_html())
 
 
 def create_app(status_file=None, db_path=None):
@@ -37,10 +43,14 @@ def create_app(status_file=None, db_path=None):
         debug=False,
         routes=[
             Route("/", endpoint=dashboard_page),
+            Route("/jnd-audit", endpoint=jnd_audit_page),
             Route("/health", endpoint=api.health_check),
             Route("/api/status", endpoint=api.get_status),
             Route("/api/slices", endpoint=api.get_slices),
             Route("/api/recent-seeds", endpoint=api.get_recent_seeds),
+            Route("/api/jnd-audit/seed", endpoint=api.get_jnd_audit_seed),
+            Route("/api/jnd-audit/neighbors", endpoint=api.get_jnd_audit_neighbors),
+            Route("/api/jnd-audit/gaps", endpoint=api.get_jnd_audit_gaps),
         ],
     )
 

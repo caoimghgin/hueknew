@@ -139,3 +139,44 @@ def lab_to_srgb_hex(L, a, b):
     b_int = int(np.clip(b_val * 255.0 + 0.5, 0, 255))
 
     return f"#{r_int:02X}{g_int:02X}{b_int:02X}"
+
+
+def lab_to_linear_srgb(L, a, b):
+    """Convert L*a*b* arrays to linear (pre-gamma) sRGB.
+
+    Args:
+        L, a, b: Arrays of L*a*b* coordinates.
+
+    Returns:
+        Tuple of (r_lin, g_lin, b_lin) float64 arrays.
+        Values outside [0, 1] are out of the sRGB gamut.
+    """
+    X, Y, Z = lab_to_xyz(
+        np.asarray(L, dtype=np.float64),
+        np.asarray(a, dtype=np.float64),
+        np.asarray(b, dtype=np.float64),
+    )
+    X, Y, Z = X / 100.0, Y / 100.0, Z / 100.0
+
+    r_lin = 3.2404542 * X - 1.5371385 * Y - 0.4985314 * Z
+    g_lin = -0.9692660 * X + 1.8760108 * Y + 0.0415560 * Z
+    b_lin = 0.0556434 * X - 0.2040259 * Y + 1.0572252 * Z
+
+    return r_lin, g_lin, b_lin
+
+
+def is_in_srgb_gamut(L, a, b):
+    """Test whether L*a*b* points fall within the sRGB gamut.
+
+    Args:
+        L, a, b: Arrays of L*a*b* coordinates.
+
+    Returns:
+        Boolean array — True where all linear sRGB channels are in [0, 1].
+    """
+    r, g, b_val = lab_to_linear_srgb(L, a, b)
+    return (
+        (r >= 0.0) & (r <= 1.0) &
+        (g >= 0.0) & (g <= 1.0) &
+        (b_val >= 0.0) & (b_val <= 1.0)
+    )
