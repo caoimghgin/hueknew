@@ -327,17 +327,31 @@ async def get_jnd_audit_seed(request):
 
 
 async def get_jnd_audit_neighbors(request):
-    """Return all sRGB JND seeds within ΔE2000 < 1.0 of a given seed."""
+    """Return all sRGB JND seeds within ΔE2000 of a given seed.
+
+    Query params:
+        seed_id: Database ID of the reference seed
+        offset: Chain-walk offset (alternative to seed_id)
+        threshold: ΔE2000 radius (default 2.0)
+    """
     _ensure_srgb_jnd_cache()
 
-    seed_id = int(request.query_params.get("seed_id", 0))
+    threshold = float(request.query_params.get("threshold", 2.0))
 
-    # Find the reference seed
+    # Look up reference by offset (preferred) or seed_id
     ref = None
-    for s in _SRGB_JND_SEEDS:
-        if s["id"] == seed_id:
-            ref = s
-            break
+    offset_param = request.query_params.get("offset")
+    if offset_param is not None:
+        offset = int(offset_param)
+        if 0 <= offset < len(_SRGB_JND_SEEDS):
+            ref = _SRGB_JND_SEEDS[offset]
+    else:
+        seed_id = int(request.query_params.get("seed_id", 0))
+        for s in _SRGB_JND_SEEDS:
+            if s["id"] == seed_id:
+                ref = s
+                break
+
     if ref is None:
         return JSONResponse({"reference": None, "neighbors": [], "count": 0})
 
@@ -345,11 +359,12 @@ async def get_jnd_audit_neighbors(request):
 
     jnd_tid = _get_jnd_threshold_id()
 
-    # Query candidates in an L* window (ΔE<1.0 can't span more than ~2 L* units)
+    # L* window scales with threshold (conservative: threshold + 1.0)
+    L_window = threshold + 1.0
     candidates = _query_db(
         "SELECT id, L, a, b, hex_srgb FROM seeds "
         "WHERE threshold_id = ? AND L BETWEEN ? AND ? AND id != ?",
-        (jnd_tid, L_ref - 2.0, L_ref + 2.0, seed_id),
+        (jnd_tid, L_ref - L_window, L_ref + L_window, ref["id"]),
     )
 
     if not candidates:
@@ -382,10 +397,10 @@ async def get_jnd_audit_neighbors(request):
     # Compute vectorized ΔE2000
     distances = delta_e_2000(L_ref, a_ref, b_ref, c_L, c_a, c_b)
 
-    # Filter to ΔE < 1.0 and sort
+    # Filter to threshold and sort
     neighbors = []
     for i, (c, de) in enumerate(zip(srgb_candidates, distances)):
-        if de < 1.0:
+        if de < threshold:
             neighbors.append({
                 "id": c["id"],
                 "L": round(c["L"], 4),

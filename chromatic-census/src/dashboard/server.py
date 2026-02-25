@@ -14,6 +14,7 @@ from starlette.routing import Route
 from . import api
 from .page import render_dashboard_html
 from .jnd_audit_page import render_jnd_audit_html
+from .jnd_neighborhood_page import render_jnd_neighborhood_html
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,11 @@ async def dashboard_page(request):
 async def jnd_audit_page(request):
     """Serve the JND Visual Audit HTML page."""
     return HTMLResponse(render_jnd_audit_html())
+
+
+async def jnd_neighborhood_page(request):
+    """Serve the JND Neighborhood HTML page."""
+    return HTMLResponse(render_jnd_neighborhood_html())
 
 
 def create_app(status_file=None, db_path=None):
@@ -44,6 +50,7 @@ def create_app(status_file=None, db_path=None):
         routes=[
             Route("/", endpoint=dashboard_page),
             Route("/jnd-audit", endpoint=jnd_audit_page),
+            Route("/jnd-neighborhood", endpoint=jnd_neighborhood_page),
             Route("/health", endpoint=api.health_check),
             Route("/api/status", endpoint=api.get_status),
             Route("/api/slices", endpoint=api.get_slices),
