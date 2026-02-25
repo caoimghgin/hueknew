@@ -18,20 +18,20 @@ The ratios between tiers are arguably more interesting than the raw counts.
 
 ## Results
 
-Counts increase with grid resolution as finer grids find seeds between previous grid points. Results across four runs:
+Counts converge as grid resolution increases. Results across four runs (with cross-slice ghost-seed deduplication):
 
 | | Coarse | Fine | Superfine | Ultrafine |
 |---|---|---|---|---|
 | **Grid steps** (L\*/a\*/b\*) | 1.0 / 2.0 / 2.0 | 0.25 / 0.5 / 0.5 | 0.125 / 0.25 / 0.25 | 0.0625 / 0.125 / 0.125 |
 | **Candidates** | ~1.6M | ~104M | ~835M | ~6.7B |
-| **JND** (ΔE=1.0) | 313,115 | 1,834,305 | 3,997,938 | **8,414,939** |
-| **Acceptability** (ΔE=2.0) | 109,032 | 513,715 | 1,063,584 | **2,162,115** |
-| **Obvious** (ΔE=5.0) | 74,463 | 337,085 | 676,635 | **1,358,876** |
-| **Runtime** | ~2 min | ~10 min | ~37 min | ~3.5 hrs |
+| **JND** (ΔE=1.0) | 172,588 | 276,941 | 299,370 | **321,930** |
+| **Acceptability** (ΔE=2.0) | 35,873 | 45,038 | 48,675 | **51,868** |
+| **Obvious** (ΔE=5.0) | 12,467 | 15,446 | 16,456 | **17,313** |
+| **Runtime** | ~2 min | ~10 min | ~52 min | ~4 hrs |
 
-Counts roughly double with each halving of step size, indicating the grid has not yet fully converged. These are lower bounds — the true counts are somewhat higher.
+Convergence ratios tighten from 1.2–1.6× (fine/coarse) to 1.05–1.08× (ultrafine/superfine), indicating the counts are within ~10% of the true values.
 
-At 8.4 million JND, the old "10 million" folklore is looking closer than our early runs suggested — though the number was arrived at for the wrong reasons. About 2.2 million meaningfully different colors, and ~1.4 million obviously different to anyone.
+At ~322,000 JND, the old "10 million" folklore is off by roughly 30×. About 52,000 meaningfully different colors, and ~17,000 obviously different to anyone. See [results/RESULTS.md](results/RESULTS.md) for the full story — including the cross-slice overcounting bug we found and fixed.
 
 ## What's Inside
 
