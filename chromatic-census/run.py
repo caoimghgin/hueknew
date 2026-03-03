@@ -6,6 +6,7 @@ Usage:
     python run.py --mode fine         # Full census (~10 minutes)
     python run.py --mode superfine   # Convergence test (~37 minutes)
     python run.py --mode ultrafine   # Deep convergence (~5-10 hours)
+    python run.py --mode hyperfine   # Convergence limit (~32 hours)
     python run.py --resume            # Resume from last checkpoint
     python run.py --status            # Print current status
     python run.py --dashboard-only    # Run dashboard without engine
@@ -26,8 +27,8 @@ import yaml
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Chromatic Census")
-    parser.add_argument("--mode", choices=["coarse", "fine", "superfine", "ultrafine"], default="fine",
-                        help="Grid resolution (default: fine)")
+    parser.add_argument("--mode", choices=["coarse", "fine", "superfine", "ultrafine", "hyperfine", "gapfill"], default="fine",
+                        help="Grid resolution or 'gapfill' for gap-filling optimization")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from the latest checkpoint")
     parser.add_argument("--status", action="store_true",
@@ -38,6 +39,10 @@ def parse_args():
                         help="Run the engine without the dashboard")
     parser.add_argument("--estimate", action="store_true",
                         help="Run quick volume-integration estimate and exit")
+    parser.add_argument("--seed-db", default=None,
+                        help="Path to seed database for gap-fill mode")
+    parser.add_argument("--random-probes", type=int, default=50_000_000,
+                        help="Number of random probes for gap-fill cleanup (default: 50M)")
     parser.add_argument("--config", default="config.yaml",
                         help="Config file path (default: config.yaml)")
     return parser.parse_args()
@@ -69,6 +74,13 @@ def apply_ultrafine_overrides(config):
     config["grid"]["L_step"] = 0.0625
     config["grid"]["a_step"] = 0.125
     config["grid"]["b_step"] = 0.125
+
+
+def apply_hyperfine_overrides(config):
+    """Override grid steps to hyperfine resolution for convergence limit."""
+    config["grid"]["L_step"] = 0.03125
+    config["grid"]["a_step"] = 0.0625
+    config["grid"]["b_step"] = 0.0625
     return config
 
 
@@ -273,6 +285,189 @@ def run_engine(config, args):
     results_db.close()
 
 
+def run_gapfill(config, args):
+    """Run gap-filling optimization on an existing seed database."""
+    from src.core.gamut import GamutValidator
+    from src.engine.gap_filler import GapFiller
+    from src.persistence.results import ResultsDatabase
+
+    logger = logging.getLogger(__name__)
+
+    # Determine source database
+    seed_db = args.seed_db
+    if seed_db is None:
+        seed_db = config["persistence"]["results_db"]
+        logger.info(f"No --seed-db specified, using {seed_db}")
+
+    seed_db = Path(seed_db)
+    if not seed_db.exists():
+        print(f"Error: Seed database not found: {seed_db}")
+        sys.exit(1)
+
+    gamut = GamutValidator(config["gamut"].get("boundary_tolerance", 0.001))
+
+    # Create gap-filler
+    gapfill = GapFiller(config, gamut, seed_db)
+    existing_counts = gapfill.load_seeds()
+    gapfill.build_trees()
+
+    print(f"\n{'='*60}")
+    print("CHROMATIC CENSUS — GAP-FILL OPTIMIZATION")
+    print(f"{'='*60}")
+    print(f"Source database: {seed_db}")
+    print(f"Existing seeds:")
+    for name, count in existing_counts.items():
+        print(f"  {name}: {count:,}")
+
+    # Set up output database
+    output_db_path = Path(config["persistence"]["results_db"])
+    results_db = ResultsDatabase(output_db_path)
+    results_db.ensure_thresholds(config["packing"]["thresholds"])
+    results_db.log_event("gapfill_start", {
+        "seed_db": str(seed_db),
+        "existing_counts": existing_counts,
+    })
+
+    # Start dashboard in background
+    status_file = Path(config["reporting"]["status_file"])
+    if config.get("dashboard", {}).get("enabled", True):
+        from src.dashboard.server import run_dashboard
+        dash_config = config.get("dashboard", {})
+        dashboard_thread = threading.Thread(
+            target=run_dashboard,
+            kwargs={
+                "host": dash_config.get("host", "0.0.0.0"),
+                "port": dash_config.get("port", 8084),
+                "status_file": str(status_file),
+                "db_path": str(output_db_path),
+            },
+            daemon=True,
+        )
+        dashboard_thread.start()
+
+    # Signal handler
+    def handle_signal(signum, frame):
+        logger.info(f"Received signal {signum}, stopping gap-filler...")
+        gapfill.stop()
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
+    # Progress callback
+    last_status_write = [0.0]
+
+    def on_slice(progress):
+        now = time.time()
+        if now - last_status_write[0] >= 5.0:
+            # Write status.json for dashboard
+            total_counts = gapfill.get_tier_counts()
+            status = {
+                "state": "gap-filling",
+                "current_slice": progress.slice_id,
+                "current_L_value": progress.L_value,
+                "total_slices": progress.total_slices,
+                "progress_pct": (progress.slice_id + 1) / progress.total_slices * 100,
+                "seeds": total_counts,
+                "new_seeds": progress.cumulative_new_per_tier,
+            }
+            try:
+                import json
+                with open(status_file, "w") as f:
+                    json.dump(status, f, indent=2)
+            except Exception:
+                pass
+            last_status_write[0] = now
+
+    # --- PASS 1: Offset grid sweep ---
+    # Use ultrafine resolution, shifted by half a step
+    L_step = 0.0625
+    a_step = 0.125
+    b_step = 0.125
+
+    print(f"\n--- Pass 1: Offset grid sweep ---")
+    print(f"Grid: L* step {L_step}, a*/b* step {a_step}")
+    print(f"Offset: half-step ({L_step/2}, {a_step/2}, {b_step/2})")
+
+    grid_results = gapfill.fill_gaps_grid(
+        L_step=L_step,
+        a_step=a_step,
+        b_step=b_step,
+        L_offset=L_step / 2,
+        a_offset=a_step / 2,
+        b_offset=b_step / 2,
+        slice_callback=on_slice,
+    )
+
+    print(f"\nPass 1 results:")
+    for r in grid_results:
+        print(
+            f"  {r.tier_name}: +{r.new_seeds:,} new seeds "
+            f"({r.total_seeds:,} total) "
+            f"[{r.candidates_skipped:,} skipped, "
+            f"{r.candidates_verified:,} verified]"
+        )
+
+    # Save grid-pass seeds to database
+    grid_new_seeds = gapfill.get_new_seeds()
+    if grid_new_seeds:
+        results_db.insert_seeds_batch(grid_new_seeds)
+        results_db.log_event("gapfill_grid_pass", {
+            t.name: r.new_seeds for t, r in zip(gapfill.tiers, grid_results)
+        })
+
+    # --- PASS 2: Random probing ---
+    if args.random_probes > 0 and gapfill._running:
+        print(f"\n--- Pass 2: Random probing ({args.random_probes:,} probes) ---")
+
+        random_results = gapfill.fill_gaps_random(
+            n_probes=args.random_probes,
+            batch_size=500_000,
+            slice_callback=on_slice,
+        )
+
+        print(f"\nPass 2 results:")
+        for r in random_results:
+            print(
+                f"  {r.tier_name}: +{r.new_seeds:,} new seeds "
+                f"({r.total_seeds:,} total)"
+            )
+
+        random_new_seeds = gapfill.get_new_seeds()
+        if random_new_seeds:
+            results_db.insert_seeds_batch(random_new_seeds)
+            results_db.log_event("gapfill_random_pass", {
+                t.name: r.new_seeds for t, r in zip(gapfill.tiers, random_results)
+            })
+
+    # --- Final results ---
+    final_counts = gapfill.get_tier_counts()
+
+    print(f"\n{'='*60}")
+    print("GAP-FILL OPTIMIZATION — FINAL RESULTS")
+    print(f"{'='*60}")
+    for name, count in final_counts.items():
+        existing = existing_counts.get(name, 0)
+        added = count - existing
+        pct = (added / existing * 100) if existing > 0 else 0
+        print(f"  {name}: {count:,}  (+{added:,}, +{pct:.1f}%)")
+    print(f"{'='*60}")
+
+    results_db.log_event("gapfill_finished", final_counts)
+    results_db.close()
+
+    # Write final status
+    import json
+    status = {
+        "state": "finished",
+        "seeds": final_counts,
+        "existing_seeds": existing_counts,
+        "new_seeds": {k: final_counts[k] - existing_counts.get(k, 0)
+                      for k in final_counts},
+    }
+    with open(status_file, "w") as f:
+        json.dump(status, f, indent=2)
+
+
 def run_dashboard_only(config):
     """Run just the dashboard server (no engine)."""
     from src.dashboard.server import run_dashboard
@@ -312,6 +507,8 @@ def main():
         config = apply_superfine_overrides(config)
     elif args.mode == "ultrafine":
         config = apply_ultrafine_overrides(config)
+    elif args.mode == "hyperfine":
+        config = apply_hyperfine_overrides(config)
 
     if args.status:
         print_status(config)
@@ -319,6 +516,8 @@ def main():
         run_estimate(config)
     elif args.dashboard_only:
         run_dashboard_only(config)
+    elif args.mode == "gapfill":
+        run_gapfill(config, args)
     else:
         run_engine(config, args)
 

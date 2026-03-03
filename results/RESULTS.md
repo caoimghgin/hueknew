@@ -133,7 +133,15 @@ This matches the everyday intuition that mid-tones are "where the color is" — 
 
 ### Grid Resolution
 
-Our convergence testing shows that counts roughly double with each halving of the grid step size across four runs (coarse → fine → superfine → ultrafine). This consistent doubling has not yet shown clear signs of flattening. The ultrafine run (L\*=0.0625, a\*/b\*=0.125) yielded ~8.4M JND — these remain **lower bounds**. Extrapolating the doubling trend suggests the converged JND count may be in the range of 15–20 million, though the curve must eventually flatten as grid points become dense enough to capture all possible seed positions.
+Greedy sphere-packing on a discrete grid can only place seeds at grid points, so the grid must be fine enough to find every possible seed position. Our four post-fix runs (coarse → fine → superfine → ultrafine) show convergence ratios tightening from 1.60× down to 1.05–1.08×, confirming we are approaching the true count from below. However, at ultrafine resolution (L\*=0.0625, a\*/b\*=0.125), JND is still growing at ~7.5% per resolution doubling — not yet fully converged.
+
+Convergence extrapolation (power-law and saturating-density models fitted to all four data points) suggests:
+
+- **Obvious** is essentially converged: the saturating model estimates ~17,500, and ultrafine measured 17,313 (99% captured).
+- **Acceptability** has further to go: model estimates range from ~52K to ~70K.
+- **JND** has not entered the asymptotic regime: standard convergence models fail to fit the data, indicating the true limit is substantially above 322K but cannot be reliably extrapolated from grid-refinement data alone.
+
+Further grid refinement yields diminishing returns at exponential cost (~36 hours per 2× step, doubling each tier). A local gap-filling optimization — inserting seeds directly into empty regions between existing seeds — is the appropriate next step to converge without brute-force grid scaling.
 
 ### Greedy Packing Is Order-Dependent
 
@@ -193,7 +201,7 @@ With ghost-seed deduplication active, the convergence ratios tell a completely d
 | **JND** (ΔE=1.0) | 172,588 | 276,941 | 299,370 | 321,930 |
 | **Acceptability** (ΔE=2.0) | 35,873 | 45,038 | 48,675 | 51,868 |
 | **Obvious** (ΔE=5.0) | 12,467 | 15,446 | 16,456 | 17,313 |
-| **Runtime** | ~2 min | ~10 min | ~52 min | ~4 hrs 5 min |
+| **Runtime** | ~2 min | ~10 min | ~52 min | ~36 hrs |
 
 **Convergence ratios:**
 
@@ -302,5 +310,25 @@ Under normal conditions — not in a calibrated lab, not with side-by-side swatc
 - **Grid:** L\* step 0.0625, a\*/b\* step 0.125
 - **Candidates:** ~6.7 billion (~1601 slices × ~4.16M per slice)
 - **Results:** JND: 321,930 · Acceptability: 51,868 · Obvious: 17,313
-- **Runtime:** ~4 hours 5 minutes
+- **Runtime:** ~36 hours
 - **Convergence ratio (UF/SF):** JND 1.08× · Acceptability 1.07× · Obvious 1.05×
+
+### Convergence Extrapolation Analysis
+
+After four post-fix runs, we attempted to extrapolate the converged limits mathematically rather than continuing to double grid resolution at exponential cost. Three models were fitted to the data:
+
+**Power-law model** `N(h) = N∞ + a·h^p` — Failed to fit for all three tiers. The data does not follow power-law convergence, indicating we haven't entered the asymptotic regime for JND or Acceptability.
+
+**Logarithmic model** `N(h) = N∞ + a·ln(h)` — Fits moderately (8–19% max error). This model implies no finite limit, which is unphysical but suggests the counts are still in a growth regime where finer grids will always find more seeds.
+
+**Saturating-density model** `N(h) = N∞ - b/(c + 1/h)^q` — Fitted successfully for Acceptability (~70,245) and Obvious (~17,515). Failed for JND.
+
+| Tier | Ultrafine count | Saturating model N∞ | % captured |
+|------|----------------:|--------------------:|-----------:|
+| **JND** | 321,930 | — (model fails) | unknown |
+| **Acceptability** | 51,868 | ~70,245 | ~74% |
+| **Obvious** | 17,313 | ~17,515 | ~99% |
+
+**Key insight:** The fundamental problem is that grid refinement is an inefficient way to find the packing limit. Each resolution doubling costs 8× more compute but only discovers ~5–8% more seeds, because it's stumbling onto gaps by chance rather than targeting them. A local optimization pass — loading the existing seeds and systematically searching for insertable gaps — should converge to the true packing limit directly, without further grid refinement.
+
+See `results/convergence_extrapolation.py` for the full analysis.
