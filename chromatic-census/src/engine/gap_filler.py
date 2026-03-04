@@ -37,9 +37,10 @@ SEARCH_RADIUS = 6.0
 
 # If the nearest existing seed is within this factor × threshold in
 # Euclidean distance, the point is certainly covered (ΔE2000 < threshold).
-# Factor of 0.3 is very conservative: ΔE2000 would need to be >3.3×
-# Euclidean to miss, which doesn't happen in practice.
-SAFE_SKIP_FACTOR = 0.3
+# ΔE2000 exceeds Euclidean by at most ~1.5× (G-factor amplification at
+# neutral axis, mid-lightness). So threshold / 1.5 ≈ 0.667 is the safe
+# limit. We use 0.6 for a small safety margin.
+SAFE_SKIP_FACTOR = 0.6
 
 
 @dataclass
@@ -297,49 +298,79 @@ class GapFiller:
                     continue
 
                 stats = tier_stats[tier.name]
+                seeds = self.tier_seeds[tier.name]
 
                 # Batch nearest-neighbor query for fast pre-filtering
-                nn_dist, _ = tree.query(candidates)
+                nn_dist, nn_idx = tree.query(candidates)
 
-                # Split candidates into categories
+                # Level 1: Skip if Euclidean distance < safe threshold
                 safe_skip_dist = tier.delta_e * SAFE_SKIP_FACTOR
                 definitely_skip = nn_dist <= safe_skip_dist
-                possibly_gap = ~definitely_skip
+                # Level 2: Definite gap if no seed within search radius
+                definitely_gap = nn_dist > SEARCH_RADIUS
+                # Level 3: Uncertain — need ΔE2000 check
+                uncertain = ~definitely_skip & ~definitely_gap
 
                 stats["skipped"] += int(definitely_skip.sum())
                 stats["checked"] += n_valid
 
-                # For possibly-gap candidates, do full ΔE2000 check
-                gap_indices = np.where(possibly_gap)[0]
-                stats["verified"] += len(gap_indices)
+                # For uncertain candidates, compute ΔE2000 to nearest seed
+                # in a single vectorized call (not per-candidate loops)
+                uncertain_idx = np.where(uncertain)[0]
+                stats["verified"] += len(uncertain_idx)
 
-                # Track new seeds for greedy packing within this slice
+                # Start with definite gaps
+                gap_mask = definitely_gap.copy()
+
+                if len(uncertain_idx) > 0:
+                    u_cands = candidates[uncertain_idx]
+                    u_nn = nn_idx[uncertain_idx]
+                    nn_seeds = seeds[u_nn]
+
+                    # Vectorized ΔE2000: each candidate vs its nearest seed
+                    nn_de = delta_e_2000(
+                        u_cands[:, 0], u_cands[:, 1], u_cands[:, 2],
+                        nn_seeds[:, 0], nn_seeds[:, 1], nn_seeds[:, 2],
+                    )
+
+                    # If ΔE2000 to nearest seed ≤ threshold, definitely covered
+                    nn_covered = nn_de <= tier.delta_e
+                    stats["skipped"] += int(nn_covered.sum())
+
+                    # Remaining uncertain: nearest seed is > threshold in ΔE2000,
+                    # but there might be OTHER seeds within radius that are closer
+                    # in ΔE2000. Need full query_ball_point check.
+                    still_uncertain_mask = ~nn_covered
+                    still_uncertain_idx = uncertain_idx[still_uncertain_mask]
+
+                    # For the small number of still-uncertain candidates,
+                    # do individual full-radius checks
+                    for idx in still_uncertain_idx:
+                        point = candidates[idx]
+                        if self._check_candidate(point, tier):
+                            gap_mask[idx] = True
+
+                # Collect confirmed gap positions and greedily pack them
+                gap_positions = candidates[gap_mask]
                 new_seed_positions = []
 
-                for idx in gap_indices:
+                for pos in gap_positions:
                     if not self._running:
                         break
 
-                    point = candidates[idx]
-
-                    # Check against existing seeds
-                    if not self._check_candidate(point, tier):
-                        continue
-
-                    # Also check against new seeds added in this slice
+                    # Check against new seeds added in this slice
                     if new_seed_positions:
                         new_arr = np.array(new_seed_positions, dtype=np.float64)
                         new_dists = delta_e_2000(
-                            point[0], point[1], point[2],
+                            pos[0], pos[1], pos[2],
                             new_arr[:, 0], new_arr[:, 1], new_arr[:, 2],
                         )
                         if np.any(new_dists <= tier.delta_e):
                             continue
 
-                    # Confirmed gap — new seed!
-                    new_seed_positions.append([point[0], point[1], point[2]])
+                    new_seed_positions.append([pos[0], pos[1], pos[2]])
                     self.tier_new_seeds[tier.name].append(
-                        [float(point[0]), float(point[1]), float(point[2])]
+                        [float(pos[0]), float(pos[1]), float(pos[2])]
                     )
                     stats["new"] += 1
                     slice_new[tier.name] += 1
@@ -450,40 +481,62 @@ class GapFiller:
                     continue
 
                 stats = tier_stats[tier.name]
+                seeds = self.tier_seeds[tier.name]
                 stats["checked"] += n_valid
 
                 # Batch nearest-neighbor pre-filter
-                nn_dist, _ = tree.query(candidates)
+                nn_dist, nn_idx = tree.query(candidates)
                 safe_skip_dist = tier.delta_e * SAFE_SKIP_FACTOR
-                possibly_gap = nn_dist > safe_skip_dist
-                stats["skipped"] += int((~possibly_gap).sum())
+                definitely_skip = nn_dist <= safe_skip_dist
+                definitely_gap = nn_dist > SEARCH_RADIUS
+                uncertain = ~definitely_skip & ~definitely_gap
 
-                gap_indices = np.where(possibly_gap)[0]
-                stats["verified"] += len(gap_indices)
+                stats["skipped"] += int(definitely_skip.sum())
 
+                gap_mask = definitely_gap.copy()
+
+                # Vectorized ΔE2000 check for uncertain candidates
+                uncertain_idx = np.where(uncertain)[0]
+                stats["verified"] += len(uncertain_idx)
+
+                if len(uncertain_idx) > 0:
+                    u_cands = candidates[uncertain_idx]
+                    u_nn = nn_idx[uncertain_idx]
+                    nn_seeds = seeds[u_nn]
+
+                    nn_de = delta_e_2000(
+                        u_cands[:, 0], u_cands[:, 1], u_cands[:, 2],
+                        nn_seeds[:, 0], nn_seeds[:, 1], nn_seeds[:, 2],
+                    )
+
+                    nn_covered = nn_de <= tier.delta_e
+                    stats["skipped"] += int(nn_covered.sum())
+
+                    still_uncertain_idx = uncertain_idx[~nn_covered]
+                    for idx in still_uncertain_idx:
+                        point = candidates[idx]
+                        if self._check_candidate(point, tier):
+                            gap_mask[idx] = True
+
+                gap_positions = candidates[gap_mask]
                 new_seed_positions = []
 
-                for idx in gap_indices:
+                for pos in gap_positions:
                     if not self._running:
                         break
-
-                    point = candidates[idx]
-
-                    if not self._check_candidate(point, tier):
-                        continue
 
                     if new_seed_positions:
                         new_arr = np.array(new_seed_positions, dtype=np.float64)
                         new_dists = delta_e_2000(
-                            point[0], point[1], point[2],
+                            pos[0], pos[1], pos[2],
                             new_arr[:, 0], new_arr[:, 1], new_arr[:, 2],
                         )
                         if np.any(new_dists <= tier.delta_e):
                             continue
 
-                    new_seed_positions.append([point[0], point[1], point[2]])
+                    new_seed_positions.append([pos[0], pos[1], pos[2]])
                     self.tier_new_seeds[tier.name].append(
-                        [float(point[0]), float(point[1]), float(point[2])]
+                        [float(pos[0]), float(pos[1]), float(pos[2])]
                     )
                     stats["new"] += 1
                     batch_new[tier.name] += 1
