@@ -1,6 +1,7 @@
 """CIE 1931 2-degree standard observer data and D65 illuminant reference values.
 
 All data is hardcoded from published CIE standards to avoid file I/O at import time.
+Includes Rösch–MacAdam optimal color boundary computation.
 """
 
 import numpy as np
@@ -9,6 +10,28 @@ import numpy as np
 D65_WHITE_X = 95.047
 D65_WHITE_Y = 100.000
 D65_WHITE_Z = 108.883
+
+# CIE D65 illuminant spectral power distribution at 5nm intervals (380–780nm)
+# Source: CIE 015:2004
+D65_SPD = np.array([
+    49.9755, 52.3118, 54.6482, 68.7015, 82.7549,
+    87.1204, 91.486,  92.4589, 93.4318, 90.057,
+    86.6823, 95.7736, 104.865, 110.936, 117.008,
+    117.41,  117.812, 116.336, 114.861, 115.392,
+    115.923, 112.367, 108.811, 109.082, 109.354,
+    108.578, 107.802, 106.296, 104.79,  106.239,
+    107.689, 106.047, 104.405, 104.225, 104.046,
+    102.023, 100.0,   98.1671, 96.3342, 96.0611,
+    95.788,  92.2368, 88.6856, 89.3459, 90.0062,
+    89.8026, 89.5991, 88.6489, 87.6987, 85.4936,
+    83.2886, 83.4939, 83.6992, 81.863,  80.0268,
+    80.1207, 80.2146, 81.2462, 82.2778, 80.281,
+    78.2842, 74.0027, 69.7213, 70.6652, 71.6091,
+    72.979,  74.349,  67.9765, 61.604,  65.7448,
+    69.8856, 72.4863, 75.087,  69.3398, 63.5927,
+    55.0054, 46.4182, 56.6118, 66.8054, 65.0941,
+    63.3828,
+])
 
 # CIE 1931 2-degree standard observer color matching functions (5nm intervals)
 # Columns: wavelength (nm), x_bar, y_bar, z_bar
@@ -136,3 +159,121 @@ def get_cached_spectral_locus():
     if _SPECTRAL_LOCUS_POLYGON is None:
         _SPECTRAL_LOCUS_POLYGON = get_spectral_locus_polygon()
     return _SPECTRAL_LOCUS_POLYGON
+
+
+# ---------------------------------------------------------------------------
+# Rösch–MacAdam optimal color boundary
+#
+# The optimal color solid defines the absolute boundary of physically
+# realizable surface colors under a given illuminant. An optimal color has
+# reflectance R(λ) ∈ {0, 1} with at most two transitions:
+#   Band:  R=1 for λ ∈ [λ₁, λ₂], else 0
+#   Notch: R=0 for λ ∈ [λ₁, λ₂], else 1
+#
+# For each (λ₁, λ₂) pair, we compute XYZ → L*a*b*. At each L* level, the
+# convex hull of achievable (a*, b*) coordinates defines the gamut boundary.
+# ---------------------------------------------------------------------------
+
+def _compute_optimal_colors():
+    """Compute all optimal color spectra (band + notch types).
+
+    Returns arrays of (L, a, b) for all optimal colors under D65.
+    """
+    from .cielab import xyz_to_lab
+
+    xbar = CIE_1931_2DEG[:, 1]
+    ybar = CIE_1931_2DEG[:, 2]
+    zbar = CIE_1931_2DEG[:, 3]
+    n = len(xbar)
+
+    # Normalize so Y of perfect white = 100
+    k = 100.0 / np.sum(D65_SPD * ybar)
+    wx = k * D65_SPD * xbar
+    wy = k * D65_SPD * ybar
+    wz = k * D65_SPD * zbar
+
+    X_white = np.sum(wx)
+    Y_white = np.sum(wy)
+    Z_white = np.sum(wz)
+
+    # Cumulative sums for fast band integral computation
+    cum_wx = np.concatenate(([0], np.cumsum(wx)))
+    cum_wy = np.concatenate(([0], np.cumsum(wy)))
+    cum_wz = np.concatenate(([0], np.cumsum(wz)))
+
+    all_L, all_a, all_b = [], [], []
+
+    for i in range(n):
+        for j in range(i, n):
+            # Band type: R=1 for wavelengths i through j
+            X_band = cum_wx[j + 1] - cum_wx[i]
+            Y_band = cum_wy[j + 1] - cum_wy[i]
+            Z_band = cum_wz[j + 1] - cum_wz[i]
+
+            if Y_band > 0:
+                L, a, b = xyz_to_lab(X_band, Y_band, Z_band)
+                all_L.append(float(L))
+                all_a.append(float(a))
+                all_b.append(float(b))
+
+            # Notch type: R=1 everywhere EXCEPT wavelengths i through j
+            X_notch = X_white - X_band
+            Y_notch = Y_white - Y_band
+            Z_notch = Z_white - Z_band
+
+            if Y_notch > 0:
+                L, a, b = xyz_to_lab(X_notch, Y_notch, Z_notch)
+                all_L.append(float(L))
+                all_a.append(float(a))
+                all_b.append(float(b))
+
+    # Add extremes: pure black and pure white
+    all_L.append(0.0); all_a.append(0.0); all_b.append(0.0)
+    L_w, a_w, b_w = xyz_to_lab(X_white, Y_white, Z_white)
+    all_L.append(float(L_w)); all_a.append(float(a_w)); all_b.append(float(b_w))
+
+    return np.array(all_L), np.array(all_a), np.array(all_b)
+
+
+def _build_macadam_boundaries(opt_L, opt_a, opt_b):
+    """Build convex hull boundaries at integer L* levels.
+
+    Returns a dict: L_level (int) -> convex hull polygon (Nx2 array).
+    """
+    from scipy.spatial import ConvexHull
+
+    boundaries = {}
+    for L_target in range(0, 101):
+        # Collect optimal colors near this L* level
+        tolerance = 0.5
+        mask = np.abs(opt_L - L_target) < tolerance
+        if np.sum(mask) < 3:
+            mask = np.abs(opt_L - L_target) < tolerance * 3
+        if np.sum(mask) < 3:
+            continue
+
+        points = np.column_stack((opt_a[mask], opt_b[mask]))
+        try:
+            hull = ConvexHull(points)
+            boundaries[L_target] = points[hull.vertices]
+        except Exception:
+            continue
+
+    return boundaries
+
+
+# Cache for the MacAdam boundary lookup table
+_MACADAM_BOUNDARIES = None
+
+
+def get_cached_macadam_boundaries():
+    """Get the cached Rösch–MacAdam boundary polygons, computing once on first call.
+
+    Returns:
+        Dict mapping integer L* (0–100) to Nx2 arrays of (a*, b*) hull vertices.
+    """
+    global _MACADAM_BOUNDARIES
+    if _MACADAM_BOUNDARIES is None:
+        opt_L, opt_a, opt_b = _compute_optimal_colors()
+        _MACADAM_BOUNDARIES = _build_macadam_boundaries(opt_L, opt_a, opt_b)
+    return _MACADAM_BOUNDARIES
