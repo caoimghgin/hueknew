@@ -59,9 +59,12 @@
 </div>
 
 <div id="tier-picker">
-  <button class="active" data-tier="obvious">Obvious (17,313)</button>
-  <button data-tier="acceptability">Acceptability (51,868)</button>
-  <button data-tier="jnd">JND (321,930)</button>
+  <div style="color:#999;font-size:10px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">MacAdam-fixed (coarse)</div>
+  <button class="active" data-tier="macadam-obvious">Obvious — MacAdam (39,164)</button>
+  <button data-tier="macadam-jnd">JND — MacAdam (196,942)</button>
+  <div style="color:#666;font-size:10px;margin:8px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Original (unfixed)</div>
+  <button data-tier="obvious">Obvious — Original (17,313)</button>
+  <button data-tier="jnd">JND — Original (321,930)</button>
 </div>
 
 <div id="camera-info">Camera: <span id="cam-pos">—</span></div>
@@ -81,6 +84,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // --- Data paths (relative to this HTML file) ---
 const TIER_FILES = {
+  'macadam-obvious': '../exports/coarse-macadam-obvious.csv',
+  'macadam-jnd': '../exports/coarse-macadam-jnd.csv',
   obvious: '../exports/chromatic-census-ultrafine-obvious-de5.0.csv',
   acceptability: '../exports/chromatic-census-ultrafine-acceptability-de2.0.csv',
   jnd: '../exports/chromatic-census-ultrafine-jnd-de1.0.csv',
@@ -253,7 +258,7 @@ rod.position.set(0, 50, 0);  // center at L*=50, a*=0, b*=0
 scene.add(rod);
 
 // --- Boot ---
-loadTier('obvious');
+loadTier('macadam-obvious');
 animate();
 </script>
 </body>
