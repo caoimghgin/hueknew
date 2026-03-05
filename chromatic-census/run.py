@@ -453,7 +453,30 @@ def run_gapfill(config, args):
     print(f"{'='*60}")
 
     results_db.log_event("gapfill_finished", final_counts)
+
+    # Persist all new seeds to database
+    all_new = gapfill.get_new_seeds()
+    if all_new:
+        results_db.insert_seeds_batch(all_new)
+        logger.info(f"Persisted {len(all_new):,} new seeds to database")
+
     results_db.close()
+
+    # Export CSVs with all seeds (original + gap-filled)
+    export_dir = Path("output/exports")
+    export_dir.mkdir(parents=True, exist_ok=True)
+    all_tier_seeds = gapfill.get_all_seeds()
+    from src.core.cielab import lab_to_srgb_hex, is_in_srgb_gamut
+    for tier in gapfill.tiers:
+        seeds = all_tier_seeds[tier.name]
+        srgb_mask = is_in_srgb_gamut(seeds[:, 0], seeds[:, 1], seeds[:, 2])
+        csv_path = export_dir / f"chromatic-census-gapfill-{tier.name}-de{tier.delta_e}.csv"
+        with open(csv_path, "w") as f:
+            f.write("id,L,a,b,hex_srgb,in_srgb\n")
+            for i, ((L, a, b), in_s) in enumerate(zip(seeds, srgb_mask), 1):
+                hex_color = lab_to_srgb_hex(L, a, b)
+                f.write(f"{i},{L},{a},{b},{hex_color},{int(in_s)}\n")
+        print(f"  Exported {len(seeds):,} {tier.name} seeds → {csv_path}")
 
     # Write final status
     import json

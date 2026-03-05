@@ -28,6 +28,14 @@ _SRGB_JND_SEEDS = None
 _CHAIN_DELTAS = None
 _CHAIN_GAP_OFFSETS = None
 
+# Graph view caches (L*-sorted index, KD-tree, numpy arrays)
+_LSTAR_SORTED_SEEDS = None  # indices into _SRGB_JND_SEEDS, sorted by L*
+_CHAIN_TO_LSTAR = None       # reverse map: chain_idx → L*-sorted offset
+_SRGB_KD_TREE = None         # cKDTree for fast neighbor lookup
+_SRGB_L = None               # numpy arrays over all sRGB seeds
+_SRGB_A = None
+_SRGB_B = None
+
 
 def _read_status():
     """Read the current status.json file."""
@@ -460,3 +468,167 @@ async def get_jnd_audit_gaps(request):
     }
 
     return JSONResponse({"gaps": gaps, "stats": stats})
+
+
+# ---------------------------------------------------------------------------
+# JND Graph View endpoints
+# ---------------------------------------------------------------------------
+
+def _ensure_graph_index():
+    """Build L*-sorted index and KD-tree over sRGB JND seeds."""
+    global _LSTAR_SORTED_SEEDS, _CHAIN_TO_LSTAR
+    global _SRGB_KD_TREE, _SRGB_L, _SRGB_A, _SRGB_B
+    if _LSTAR_SORTED_SEEDS is not None:
+        return
+
+    _ensure_srgb_jnd_cache()
+
+    if not _SRGB_JND_SEEDS:
+        _LSTAR_SORTED_SEEDS = []
+        _CHAIN_TO_LSTAR = {}
+        return
+
+    import time
+    t0 = time.monotonic()
+
+    n = len(_SRGB_JND_SEEDS)
+    _SRGB_L = np.array([s["L"] for s in _SRGB_JND_SEEDS])
+    _SRGB_A = np.array([s["a"] for s in _SRGB_JND_SEEDS])
+    _SRGB_B = np.array([s["b"] for s in _SRGB_JND_SEEDS])
+
+    # L*-sorted indices (argsort on L values)
+    _LSTAR_SORTED_SEEDS = np.argsort(_SRGB_L).tolist()
+
+    # Reverse map: chain_idx → L*-sorted offset
+    _CHAIN_TO_LSTAR = {ci: lo for lo, ci in enumerate(_LSTAR_SORTED_SEEDS)}
+
+    # KD-tree for fast Euclidean neighbor lookup
+    _SRGB_KD_TREE = cKDTree(np.column_stack([_SRGB_L, _SRGB_A, _SRGB_B]))
+
+    elapsed = time.monotonic() - t0
+    logger.info(f"Graph index: {n:,} seeds, KD-tree built in {elapsed:.2f}s")
+
+
+async def get_jnd_graph(request):
+    """Return force-directed graph data for a focus seed and its neighborhood.
+
+    Query params:
+        offset: index in L*-sorted sRGB seeds (default 0)
+        threshold: ΔE2000 radius (default 1.5)
+        depth: 1 = direct neighbors, 2 = neighbors-of-neighbors (default 2)
+    """
+    _ensure_graph_index()
+
+    offset = int(request.query_params.get("offset", 0))
+    threshold = float(request.query_params.get("threshold", 1.5))
+    depth = max(1, min(int(request.query_params.get("depth", 2)), 2))
+
+    total = len(_LSTAR_SORTED_SEEDS)
+    if total == 0 or offset >= total:
+        return JSONResponse({"focus": None, "nodes": [], "edges": [],
+                             "stats": {}, "total": total, "offset": offset})
+
+    # Convert L*-sorted offset → chain-walk index
+    focus_ci = _LSTAR_SORTED_SEEDS[offset]
+    focus = _SRGB_JND_SEEDS[focus_ci]
+    fL, fa, fb = focus["L"], focus["a"], focus["b"]
+
+    # --- Depth-1: direct neighbors ---
+    euclidean_r = threshold * 3.0  # conservative for ΔE2000
+    d1_cand = _SRGB_KD_TREE.query_ball_point([fL, fa, fb], euclidean_r)
+    d1_cand = [i for i in d1_cand if i != focus_ci]
+
+    d1_indices = []
+    if d1_cand:
+        c = np.array(d1_cand)
+        de = delta_e_2000(fL, fa, fb, _SRGB_L[c], _SRGB_A[c], _SRGB_B[c])
+        mask = de < threshold
+        d1_indices = c[mask].tolist()
+
+    # --- Depth-2: neighbors of neighbors ---
+    d2_indices = []
+    if depth == 2 and d1_indices:
+        known = set(d1_indices) | {focus_ci}
+        d2_set = set()
+        for ni in d1_indices:
+            c2 = _SRGB_KD_TREE.query_ball_point(
+                [_SRGB_L[ni], _SRGB_A[ni], _SRGB_B[ni]], euclidean_r
+            )
+            c2 = [j for j in c2 if j not in known and j not in d2_set]
+            if c2:
+                ca = np.array(c2)
+                de2 = delta_e_2000(
+                    _SRGB_L[ni], _SRGB_A[ni], _SRGB_B[ni],
+                    _SRGB_L[ca], _SRGB_A[ca], _SRGB_B[ca],
+                )
+                for j, d in zip(ca, de2):
+                    if d < threshold:
+                        d2_set.add(int(j))
+        d2_indices = list(d2_set)
+
+    # --- Build node list ---
+    all_ci = [focus_ci] + d1_indices + d2_indices
+    depths = [0] + [1] * len(d1_indices) + [2] * len(d2_indices)
+
+    # Precompute ΔE from focus to all non-focus nodes
+    if len(all_ci) > 1:
+        other = np.array(all_ci[1:])
+        de_focus_arr = delta_e_2000(fL, fa, fb,
+                                     _SRGB_L[other], _SRGB_A[other], _SRGB_B[other])
+    else:
+        de_focus_arr = np.array([])
+
+    nodes = []
+    for i, (ci, d) in enumerate(zip(all_ci, depths)):
+        s = _SRGB_JND_SEEDS[ci]
+        de_f = 0.0 if d == 0 else round(float(de_focus_arr[i - 1]), 4)
+        nodes.append({
+            "id": s["id"],
+            "hex": s["hex_srgb"],
+            "L": round(s["L"], 4),
+            "a": round(s["a"], 4),
+            "b": round(s["b"], 4),
+            "depth": d,
+            "de_focus": de_f,
+            "lstar_offset": _CHAIN_TO_LSTAR.get(ci, 0),
+        })
+
+    # --- Compute inter-node edges ---
+    edges = []
+    n_nodes = len(all_ci)
+    for i in range(n_nodes):
+        if i + 1 >= n_nodes:
+            break
+        targets = np.array(all_ci[i + 1:])
+        de_batch = delta_e_2000(
+            _SRGB_L[all_ci[i]], _SRGB_A[all_ci[i]], _SRGB_B[all_ci[i]],
+            _SRGB_L[targets], _SRGB_A[targets], _SRGB_B[targets],
+        )
+        for k, de_val in enumerate(de_batch):
+            if de_val < threshold:
+                edges.append({
+                    "source": i,
+                    "target": i + 1 + k,
+                    "de": round(float(de_val), 4),
+                })
+
+    return JSONResponse({
+        "focus": {
+            "id": focus["id"],
+            "hex": focus["hex_srgb"],
+            "L": round(fL, 4),
+            "a": round(fa, 4),
+            "b": round(fb, 4),
+            "lstar_offset": offset,
+        },
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "depth_1_count": len(d1_indices),
+            "depth_2_count": len(d2_indices),
+            "total_nodes": n_nodes,
+            "total_edges": len(edges),
+        },
+        "total": total,
+        "offset": offset,
+    })

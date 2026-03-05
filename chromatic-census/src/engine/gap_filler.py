@@ -102,7 +102,8 @@ class GapFiller:
         self.tiers = []  # List of TierConfig
         self.tier_seeds = {}  # tier_name -> Nx3 float64 array
         self.tier_trees = {}  # tier_name -> cKDTree
-        self.tier_new_seeds = {}  # tier_name -> list of [L, a, b]
+        self.tier_new_seeds = {}  # tier_name -> list of [L, a, b] (buffer, cleared on tree rebuild)
+        self.tier_all_new_seeds = {}  # tier_name -> list of [L, a, b] (permanent record)
 
         self._running = True
 
@@ -151,6 +152,7 @@ class GapFiller:
 
             self.tier_seeds[tier.name] = seeds
             self.tier_new_seeds[tier.name] = []
+            self.tier_all_new_seeds[tier.name] = []
             counts[tier.name] = len(seeds)
             logger.info(f"  {tier.name} (ΔE={tier.delta_e}): {len(seeds):,} seeds loaded")
 
@@ -175,6 +177,9 @@ class GapFiller:
         new = self.tier_new_seeds[tier_name]
         if not new:
             return
+
+        # Preserve new seeds in permanent record before clearing buffer
+        self.tier_all_new_seeds[tier_name].extend(new)
 
         new_arr = np.array(new, dtype=np.float64).reshape(-1, 3)
         existing = self.tier_seeds[tier_name]
@@ -587,20 +592,40 @@ class GapFiller:
     def get_new_seeds(self):
         """Return all new seeds found across all tiers.
 
+        Includes seeds from both the buffer and those already merged into
+        the main array (via tree rebuilds).
+
         Returns:
             List of dicts with L, a, b, hex, tier keys.
         """
         all_seeds = []
         for tier in self.tiers:
+            # Permanent record + any still in the unmerged buffer
+            for pos in self.tier_all_new_seeds[tier.name]:
+                L, a, b = pos
+                all_seeds.append({
+                    "L": L, "a": a, "b": b,
+                    "hex": lab_to_srgb_hex(L, a, b),
+                    "tier": tier.name,
+                    "slice_id": -1,
+                })
             for pos in self.tier_new_seeds[tier.name]:
                 L, a, b = pos
                 all_seeds.append({
                     "L": L, "a": a, "b": b,
                     "hex": lab_to_srgb_hex(L, a, b),
                     "tier": tier.name,
-                    "slice_id": -1,  # Gap-fill seeds don't belong to a specific slice
+                    "slice_id": -1,
                 })
         return all_seeds
+
+    def get_all_seeds(self):
+        """Return ALL seeds (original + gap-filled) for all tiers.
+
+        Returns:
+            Dict of tier_name -> Nx3 numpy array of [L, a, b].
+        """
+        return {t.name: self.tier_seeds[t.name] for t in self.tiers}
 
     def get_tier_counts(self):
         """Return current total seed counts per tier."""
@@ -608,4 +633,7 @@ class GapFiller:
 
     def get_tier_new_counts(self):
         """Return new seed counts per tier (from gap-filling only)."""
-        return {t.name: len(self.tier_new_seeds[t.name]) for t in self.tiers}
+        return {
+            t.name: len(self.tier_all_new_seeds[t.name]) + len(self.tier_new_seeds[t.name])
+            for t in self.tiers
+        }

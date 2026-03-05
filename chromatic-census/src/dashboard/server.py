@@ -15,6 +15,7 @@ from . import api
 from .page import render_dashboard_html
 from .jnd_audit_page import render_jnd_audit_html
 from .jnd_neighborhood_page import render_jnd_neighborhood_html
+from .jnd_graph_page import render_jnd_graph_html
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,11 @@ async def jnd_neighborhood_page(request):
     return HTMLResponse(render_jnd_neighborhood_html())
 
 
+async def jnd_graph_page(request):
+    """Serve the JND Graph HTML page."""
+    return HTMLResponse(render_jnd_graph_html())
+
+
 def create_app(status_file=None, db_path=None):
     """Create the Starlette application.
 
@@ -51,6 +57,7 @@ def create_app(status_file=None, db_path=None):
             Route("/", endpoint=dashboard_page),
             Route("/jnd-audit", endpoint=jnd_audit_page),
             Route("/jnd-neighborhood", endpoint=jnd_neighborhood_page),
+            Route("/jnd-graph", endpoint=jnd_graph_page),
             Route("/health", endpoint=api.health_check),
             Route("/api/status", endpoint=api.get_status),
             Route("/api/slices", endpoint=api.get_slices),
@@ -58,6 +65,7 @@ def create_app(status_file=None, db_path=None):
             Route("/api/jnd-audit/seed", endpoint=api.get_jnd_audit_seed),
             Route("/api/jnd-audit/neighbors", endpoint=api.get_jnd_audit_neighbors),
             Route("/api/jnd-audit/gaps", endpoint=api.get_jnd_audit_gaps),
+            Route("/api/jnd-graph", endpoint=api.get_jnd_graph),
         ],
     )
 

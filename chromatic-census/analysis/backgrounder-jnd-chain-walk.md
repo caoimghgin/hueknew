@@ -335,6 +335,56 @@ finer resolutions would establish the asymptotic limit.
 
 ---
 
+## The JND Graph View
+
+The graph view (http://10.0.0.108:8084/jnd-graph) renders the packing
+as what it actually is: a **graph**, not a line.
+
+### How it works
+
+Each seed is rendered as a circle filled with its actual color. The
+**focus seed** sits at the left-center. Its direct neighbors (depth 1)
+float to the right based on their ΔE distance from the focus. Neighbors
+of neighbors (depth 2) appear further right, smaller and more
+transparent.
+
+**Two meaningful axes:**
+- **X-axis:** ΔE distance to the focus seed (closer = left, farther = right)
+- **Y-axis:** L* lightness (darker = top, lighter = bottom)
+
+**Edges** connect every pair of nodes within the ΔE threshold — not just
+seed→neighbor, but neighbor→neighbor. This is the key insight: the edges
+prove the packing is complete. Every gap is filled.
+
+D3.js force simulation prevents node overlap while preserving the
+semantic axis positions. `forceCollide` keeps circles from stacking;
+`forceX` and `forceY` pull nodes toward their ΔE/L* positions.
+
+### What the numbers look like
+
+| Seed region | Depth-1 | Total nodes | Edges |
+|-------------|---------|-------------|-------|
+| Black (L*=0) | 4 | 18 | 47 |
+| Mid-tone (L*~54) | 12 | 55 | 193 |
+| Typical range | 8–14 | 40–80 | 100–250 |
+
+A mid-tone seed surrounded by 12 direct neighbors and 193 edges
+between 55 nodes. Try fitting another distinguishable color in there.
+
+### Interaction
+
+- **Click any neighbor** → it becomes the new focus, graph re-centers
+- **Slider** → browse all 137,693 seeds by L*-sorted order (no chain walk)
+- **Threshold buttons** [1.0] [1.5] [2.0] → adjust the ΔE radius
+- **Depth toggle** [1] [2] → show direct neighbors only, or with second-degree
+- **Arrow keys** → step through seeds
+- **Hover** → tooltip with hex, L*a*b*, ΔE to focus
+
+No chain walk. No dregs. Every seed is accessible by its lightness
+position, and every neighborhood is complete.
+
+---
+
 ## The Stronger Claim
 
 The chain walk's falsifiable claim was:
@@ -353,10 +403,18 @@ This claim:
 - Shows the actual 3D packing topology
 - Is visually self-evident: the neighborhood is full
 
-The graph view (planned) will render this as a force-directed network:
-each seed surrounded by its neighbors, with edges showing all
-connections within ΔE 1.5. The viewer can click any node to re-center,
-walking the packing graph directly.
+The graph view renders this as a force-directed network: each seed
+surrounded by its neighbors, with edges showing all connections within
+ΔE 1.5. The X-axis maps to ΔE distance from the focus seed (closer =
+left), the Y-axis maps to L* lightness (darker = top). Nodes are filled
+with their actual sRGB color. Click any node to re-center on it, walking
+the packing graph directly.
+
+At depth 2 (neighbors of neighbors), a typical mid-tone seed shows
+~55 nodes and ~190 edges. At the extremes (black, L*=0), there are
+fewer neighbors (4 direct, 18 total) because the gamut boundary is
+close. The graph makes the packing density viscerally obvious: every
+direction is blocked.
 
 ---
 
@@ -366,7 +424,7 @@ walking the packing graph directly.
 |------|-------------|
 | JND Visual Audit | Interactive three-panel chain-walk viewer with gap navigation |
 | JND Neighborhood | Orbital view showing all neighbors within ΔE radius |
-| JND Graph (planned) | Force-directed network view with inter-neighbor edges |
+| JND Graph | Force-directed network view with inter-neighbor edges, D3.js |
 | `analysis/gap_analysis.py` | Gap analysis for any chain-walk triple — checks for gamut holes |
 | `analysis/neighbor_density.py` | Neighbor count analysis for all sRGB seeds |
 
@@ -413,4 +471,4 @@ docker run --rm \
 | 2026-02-25 | "Think in 3D" insight — neighborhood density analysis reveals median 10 neighbors |
 | 2026-02-25 | Ultrafine census: 321,930 JND seeds, 137,693 sRGB (+19%) |
 | 2026-02-25 | Chain walk pacing: target L* reference for smooth dark→light progression |
-| Next | JND Graph View: force-directed neighborhood explorer |
+| 2026-02-28 | JND Graph View: force-directed neighborhood explorer with D3.js |

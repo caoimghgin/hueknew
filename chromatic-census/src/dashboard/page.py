@@ -60,6 +60,25 @@ def render_dashboard_html():
   }
   #connection-status.error { background: var(--red); color: #fff; }
 
+  nav.views {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  nav.views a {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 13px;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    transition: all 0.15s ease;
+  }
+  nav.views a:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
   .grid { display: grid; gap: 16px; margin-bottom: 16px; }
   .grid-3 { grid-template-columns: repeat(3, 1fr); }
   .grid-2 { grid-template-columns: 1fr 1fr; }
@@ -192,6 +211,12 @@ def render_dashboard_html():
   </div>
   <span id="connection-status">Connecting...</span>
 </header>
+
+<nav class="views">
+  <a href="/jnd-audit">JND Visual Audit</a>
+  <a href="/jnd-neighborhood">JND Neighborhood</a>
+  <a href="/jnd-graph">JND Graph</a>
+</nav>
 
 <div id="app">
   <div class="not-started" id="not-started">
