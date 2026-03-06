@@ -98,12 +98,16 @@
 </div>
 
 <div id="tier-picker">
-  <div style="color:#999;font-size:10px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">MacAdam-fixed (coarse)</div>
-  <button class="active" data-tier="macadam-obvious">Obvious — MacAdam (39,164)</button>
-  <button data-tier="macadam-jnd">JND — MacAdam (196,942)</button>
-  <div style="color:#666;font-size:10px;margin:8px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Original (unfixed)</div>
-  <button data-tier="obvious">Obvious — Original (17,313)</button>
-  <button data-tier="jnd">JND — Original (321,930)</button>
+  <div style="color:#999;font-size:10px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">MacAdam-fixed (ultrafine)</div>
+  <button class="active" data-tier="uf-obvious">Obvious (8,687)</button>
+  <button data-tier="uf-acceptability">Acceptability (33,509)</button>
+  <button data-tier="uf-jnd">JND (269,812)</button>
+  <div style="color:#666;font-size:10px;margin:8px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">MacAdam-fixed (coarse)</div>
+  <button data-tier="macadam-obvious">Obvious — coarse (39,164)</button>
+  <button data-tier="macadam-jnd">JND — coarse (196,942)</button>
+  <div style="color:#555;font-size:10px;margin:8px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Original (pre-MacAdam)</div>
+  <button data-tier="obvious">Obvious — original (17,313)</button>
+  <button data-tier="jnd">JND — original (321,930)</button>
 </div>
 
 <div id="gamut-overlays">
@@ -264,10 +268,12 @@ function labTo3D(L, a, b, mode) {
 // Data paths
 // ============================================================
 const TIER_FILES = {
+  'uf-obvious': '../exports/ultrafine-macadam-obvious.csv',
+  'uf-acceptability': '../exports/ultrafine-macadam-acceptability.csv',
+  'uf-jnd': '../exports/ultrafine-macadam-JND.csv',
   'macadam-obvious': '../exports/coarse-macadam-obvious.csv',
   'macadam-jnd': '../exports/coarse-macadam-jnd.csv',
   obvious: '../exports/chromatic-census-ultrafine-obvious-de5.0.csv',
-  acceptability: '../exports/chromatic-census-ultrafine-acceptability-de2.0.csv',
   jnd: '../exports/chromatic-census-ultrafine-jnd-de1.0.csv',
 };
 
@@ -724,7 +730,7 @@ function animate() {
 // ============================================================
 // Boot
 // ============================================================
-loadTier('macadam-obvious');
+loadTier('uf-obvious');
 animate();
 </script>
 </body>

@@ -74,6 +74,7 @@ def apply_ultrafine_overrides(config):
     config["grid"]["L_step"] = 0.0625
     config["grid"]["a_step"] = 0.125
     config["grid"]["b_step"] = 0.125
+    return config
 
 
 def apply_hyperfine_overrides(config):
