@@ -66,6 +66,10 @@
   }
   #gamut-overlays .sub-controls input[type=range] { width: 100px; vertical-align: middle; }
   #gamut-overlays .sub-controls .val { color: #999; display: inline-block; width: 28px; text-align: right; }
+  #gamut-overlays .divider {
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin: 8px 0;
+  }
   #coord-mode {
     position: fixed; top: 130px; left: 16px; z-index: 10;
     background: rgba(0,0,0,0.7); padding: 10px 14px; border-radius: 8px;
@@ -129,6 +133,14 @@
   <div class="sub-controls" id="adobe-controls" style="display:none;">
     Opacity <input type="range" id="adobe-opacity" min="0.02" max="0.5" step="0.02" value="0.08">
     <span class="val" id="adobe-opacity-val">0.08</span>
+  </div>
+  <div class="divider"></div>
+  <label>
+    <input type="checkbox" id="toggle-clip">
+    Clip to gamut
+  </label>
+  <div id="clip-info" style="display:none; margin: 2px 0 0 22px; font-size: 10px; color: #666;">
+    Hides seeds outside enabled gamut(s)
   </div>
 </div>
 
@@ -229,6 +241,7 @@ function adobeRgbLinearize(c) {
   return Math.pow(c, 2.19921875);
 }
 
+// RGB → XYZ matrices (forward)
 const SRGB_TO_XYZ = [
   0.4124564, 0.3575761, 0.1804375,
   0.2126729, 0.7151522, 0.0721750,
@@ -239,6 +252,26 @@ const ADOBE_TO_XYZ = [
   0.2973769, 0.6273491, 0.0752741,
   0.0270343, 0.0706872, 0.9911085,
 ];
+
+// XYZ → linear RGB matrices (inverse, for gamut membership checks)
+const XYZ_TO_SRGB = [
+   3.2404542, -1.5371385, -0.4985314,
+  -0.9692660,  1.8760108,  0.0415560,
+   0.0556434, -0.2040259,  1.0572252,
+];
+const XYZ_TO_ADOBE = [
+   2.0413690, -0.5649464, -0.3446944,
+  -0.9692660,  1.8760108,  0.0415560,
+   0.0134474, -0.1183897,  1.0154096,
+];
+
+function xyzInGamut(X, Y, Z, invMat) {
+  const r = invMat[0]*X + invMat[1]*Y + invMat[2]*Z;
+  const g = invMat[3]*X + invMat[4]*Y + invMat[5]*Z;
+  const b = invMat[6]*X + invMat[7]*Y + invMat[8]*Z;
+  const tol = 1e-4;
+  return r >= -tol && r <= 1+tol && g >= -tol && g <= 1+tol && b >= -tol && b <= 1+tol;
+}
 
 function linearRgbToXyz(r, g, b, m) {
   return [m[0]*r + m[1]*g + m[2]*b, m[3]*r + m[4]*g + m[5]*b, m[6]*r + m[7]*g + m[8]*b];
@@ -301,16 +334,45 @@ orbitControls.update();
 // State
 // ============================================================
 let currentPoints = null;
-let currentTier = 'macadam-obvious';
+let currentTier = 'uf-obvious';
 let currentMode = 'lab';   // 'lab' or 'xyy'
 let pointSize = 2.5;
 let pointAlpha = 1.0;
-const tierCache = {};       // tier → { labValues: Float32Array, colors: Float32Array, count }
+const tierCache = {};       // tier → { labValues, colors, gamutFlags, count }
 let srgbVisible = false;
 let adobeVisible = false;
+let clipToGamut = false;
 
 // ============================================================
-// Parse CSV — stores raw Lab values (not mode-dependent positions)
+// Custom shader for per-vertex alpha (used for gamut clipping)
+// ============================================================
+const pointVertexShader = `
+  attribute float pointAlpha;
+  varying vec3 vColor;
+  varying float vAlpha;
+  uniform float uSize;
+  uniform float uScale;
+  void main() {
+    vColor = color;
+    vAlpha = pointAlpha;
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = uSize * (uScale / -mvPos.z);
+    gl_Position = projectionMatrix * mvPos;
+  }
+`;
+const pointFragmentShader = `
+  varying vec3 vColor;
+  varying float vAlpha;
+  uniform float uOpacity;
+  void main() {
+    float a = vAlpha * uOpacity;
+    if (a < 0.01) discard;
+    gl_FragColor = vec4(vColor, a);
+  }
+`;
+
+// ============================================================
+// Parse CSV — stores raw Lab values + gamut membership flags
 // ============================================================
 function parseCSV(text) {
   const lines = text.trim().split('\n');
@@ -321,8 +383,9 @@ function parseCSV(text) {
   const iHex = header.indexOf('hex_srgb');
 
   const count = lines.length - 1;
-  const labValues = new Float32Array(count * 3);  // [L, a, b, L, a, b, ...]
+  const labValues = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
+  const gamutFlags = new Uint8Array(count);  // bit 0 = sRGB, bit 1 = Adobe RGB
   const tmpColor = new THREE.Color();
 
   for (let i = 1; i <= count; i++) {
@@ -341,9 +404,16 @@ function parseCSV(text) {
     colors[idx]     = tmpColor.r;
     colors[idx + 1] = tmpColor.g;
     colors[idx + 2] = tmpColor.b;
+
+    // Gamut membership check
+    const [X, Y, Z] = labToXyz(L, a, b);
+    let flags = 0;
+    if (xyzInGamut(X, Y, Z, XYZ_TO_SRGB))  flags |= 1;
+    if (xyzInGamut(X, Y, Z, XYZ_TO_ADOBE))  flags |= 2;
+    gamutFlags[i - 1] = flags;
   }
 
-  return { labValues, colors, count };
+  return { labValues, colors, gamutFlags, count };
 }
 
 // ============================================================
@@ -363,8 +433,39 @@ function computePositions(labValues, count, mode) {
 }
 
 // ============================================================
+// Compute per-vertex alpha based on clip state
+// ============================================================
+function computeAlphas(gamutFlags, count) {
+  const alphas = new Float32Array(count);
+  if (!clipToGamut) {
+    alphas.fill(1.0);
+    return alphas;
+  }
+  // Determine which gamuts to clip against
+  const checkSrgb = srgbVisible;
+  const checkAdobe = adobeVisible;
+  // If clip is on but no gamut is enabled, show everything
+  if (!checkSrgb && !checkAdobe) {
+    alphas.fill(1.0);
+    return alphas;
+  }
+  for (let i = 0; i < count; i++) {
+    const f = gamutFlags[i];
+    let visible = false;
+    if (checkSrgb && (f & 1))  visible = true;
+    if (checkAdobe && (f & 2)) visible = true;
+    alphas[i] = visible ? 1.0 : 0.0;
+  }
+  return alphas;
+}
+
+// ============================================================
 // Create/update point cloud
 // ============================================================
+function getUScale() {
+  return renderer.getPixelRatio() * window.innerHeight * 0.5;
+}
+
 function buildPointCloud(data) {
   if (currentPoints) {
     scene.remove(currentPoints);
@@ -373,24 +474,43 @@ function buildPointCloud(data) {
   }
 
   const positions = computePositions(data.labValues, data.count, currentMode);
+  const alphas = computeAlphas(data.gamutFlags, data.count);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+  geometry.setAttribute('pointAlpha', new THREE.BufferAttribute(alphas, 1));
 
-  const material = new THREE.PointsMaterial({
-    size: pointSize,
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uSize: { value: pointSize },
+      uScale: { value: getUScale() },
+      uOpacity: { value: pointAlpha },
+    },
+    vertexShader: pointVertexShader,
+    fragmentShader: pointFragmentShader,
     vertexColors: true,
-    sizeAttenuation: true,
     transparent: true,
-    opacity: pointAlpha,
-    depthWrite: pointAlpha > 0.95,
+    depthWrite: pointAlpha > 0.95 && !clipToGamut,
   });
 
   currentPoints = new THREE.Points(geometry, material);
   scene.add(currentPoints);
 
   document.getElementById('seed-count').textContent = data.count.toLocaleString();
+}
+
+// ============================================================
+// Update clip alphas without rebuilding entire point cloud
+// ============================================================
+function updateClipAlphas() {
+  if (!currentPoints || !tierCache[currentTier]) return;
+  const data = tierCache[currentTier];
+  const alphas = computeAlphas(data.gamutFlags, data.count);
+  const attr = currentPoints.geometry.getAttribute('pointAlpha');
+  attr.array.set(alphas);
+  attr.needsUpdate = true;
+  currentPoints.material.depthWrite = pointAlpha > 0.95 && !clipToGamut;
 }
 
 // ============================================================
@@ -615,11 +735,6 @@ function updateShellVisibility() {
   shells.adobe.xyy.group.visible = adobeVisible && currentMode === 'xyy';
 }
 
-// Helper to get the active shell for a gamut in the current mode
-function activeShell(gamut) {
-  return shells[gamut][currentMode];
-}
-
 // ============================================================
 // UI wiring
 // ============================================================
@@ -630,7 +745,7 @@ const sizeVal = document.getElementById('size-val');
 sizeSlider.addEventListener('input', () => {
   pointSize = parseFloat(sizeSlider.value);
   sizeVal.textContent = pointSize.toFixed(1);
-  if (currentPoints) currentPoints.material.size = pointSize;
+  if (currentPoints) currentPoints.material.uniforms.uSize.value = pointSize;
 });
 
 // Point opacity
@@ -640,8 +755,8 @@ alphaSlider.addEventListener('input', () => {
   pointAlpha = parseFloat(alphaSlider.value);
   alphaVal.textContent = pointAlpha.toFixed(2);
   if (currentPoints) {
-    currentPoints.material.opacity = pointAlpha;
-    currentPoints.material.depthWrite = pointAlpha > 0.95;
+    currentPoints.material.uniforms.uOpacity.value = pointAlpha;
+    currentPoints.material.depthWrite = pointAlpha > 0.95 && !clipToGamut;
   }
 });
 
@@ -663,18 +778,28 @@ document.querySelectorAll('#coord-mode button').forEach(btn => {
 // Gamut overlays
 const toggleSrgb = document.getElementById('toggle-srgb');
 const toggleAdobe = document.getElementById('toggle-adobe');
+const toggleClip = document.getElementById('toggle-clip');
 const srgbControlsEl = document.getElementById('srgb-controls');
 const adobeControlsEl = document.getElementById('adobe-controls');
+const clipInfoEl = document.getElementById('clip-info');
 
 toggleSrgb.addEventListener('change', () => {
   srgbVisible = toggleSrgb.checked;
   srgbControlsEl.style.display = srgbVisible ? 'block' : 'none';
   updateShellVisibility();
+  if (clipToGamut) updateClipAlphas();
 });
 toggleAdobe.addEventListener('change', () => {
   adobeVisible = toggleAdobe.checked;
   adobeControlsEl.style.display = adobeVisible ? 'block' : 'none';
   updateShellVisibility();
+  if (clipToGamut) updateClipAlphas();
+});
+
+toggleClip.addEventListener('change', () => {
+  clipToGamut = toggleClip.checked;
+  clipInfoEl.style.display = clipToGamut ? 'block' : 'none';
+  updateClipAlphas();
 });
 
 // Gamut opacity sliders
@@ -715,6 +840,9 @@ window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  if (currentPoints) {
+    currentPoints.material.uniforms.uScale.value = getUScale();
+  }
 });
 
 // ============================================================
