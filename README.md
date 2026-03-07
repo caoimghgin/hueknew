@@ -1,4 +1,6 @@
-# HueKnew
+<p align="center">
+  <img src="resources/logo.svg" alt="HueKnew" width="400">
+</p>
 
 **How many colors can the human eye actually see?**
 
