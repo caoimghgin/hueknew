@@ -581,13 +581,45 @@ def _import_csvs_to_db(db_path):
         print(f"  {tier_name}: {len(batch):,} seeds imported")
 
     conn.commit()
+
+    # Build slices table — group seeds by L* value into slices
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS slices (
+            slice_id INTEGER,
+            threshold_id INTEGER REFERENCES thresholds(id),
+            L_value REAL,
+            valid_points INTEGER,
+            seeds_found INTEGER,
+            density REAL,
+            completed_at TIMESTAMP,
+            duration_seconds REAL,
+            PRIMARY KEY (slice_id, threshold_id)
+        );
+    """)
+    # Synthesize slices from imported seeds (group by integer L*)
+    for tid_row in conn.execute("SELECT id FROM thresholds").fetchall():
+        tid = tid_row[0]
+        rows = conn.execute(
+            "SELECT CAST(L AS INTEGER) AS slice_id, "
+            "       CAST(L AS INTEGER) * 1.0 AS L_value, "
+            "       COUNT(*) AS seeds_found "
+            "FROM seeds WHERE threshold_id = ? "
+            "GROUP BY CAST(L AS INTEGER) ORDER BY slice_id",
+            (tid,),
+        ).fetchall()
+        conn.executemany(
+            "INSERT OR REPLACE INTO slices "
+            "(slice_id, threshold_id, L_value, valid_points, seeds_found, density, completed_at) "
+            "VALUES (?, ?, ?, 0, ?, 0.0, CURRENT_TIMESTAMP)",
+            [(r[0], tid, r[1], r[2]) for r in rows],
+        )
+    conn.commit()
     conn.close()
     return True
 
 
 def run_dashboard_only(config):
     """Run just the dashboard server (no engine)."""
-    from src.dashboard.server import run_dashboard
     dash_config = config.get("dashboard", {})
     status_file = config["reporting"]["status_file"]
     db_path = config["persistence"]["results_db"]
@@ -597,11 +629,34 @@ def run_dashboard_only(config):
         if _import_csvs_to_db(db_path):
             # Write a status file so the dashboard shows results
             import json
-            status = {"state": "finished", "seeds": {}}
+            import sqlite3
+            conn = sqlite3.connect(str(db_path))
+            seed_counts = {}
+            for row in conn.execute(
+                "SELECT t.name, COUNT(*) FROM seeds s "
+                "JOIN thresholds t ON t.id = s.threshold_id GROUP BY t.name"
+            ).fetchall():
+                seed_counts[row[0]] = row[1]
+            total_slices = conn.execute(
+                "SELECT COUNT(DISTINCT slice_id) FROM slices"
+            ).fetchone()[0]
+            conn.close()
+            status = {
+                "state": "finished",
+                "seeds": seed_counts,
+                "progress_pct": 100,
+                "current_slice": total_slices - 1,
+                "total_slices": total_slices,
+                "current_L_value": 100.0,
+                "elapsed_seconds": 0,
+                "eta_seconds": 0,
+                "rate_points_per_sec": 0,
+            }
             Path(status_file).parent.mkdir(parents=True, exist_ok=True)
             with open(status_file, "w") as f:
                 json.dump(status, f)
 
+    from src.dashboard.server import run_dashboard
     print(f"Dashboard running on http://0.0.0.0:{dash_config.get('port', 8084)}")
     run_dashboard(
         host=dash_config.get("host", "0.0.0.0"),
