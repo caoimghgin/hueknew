@@ -1,4 +1,4 @@
-# hueknew
+# HueKnew
 
 **How many colors can the human eye actually see?**
 
