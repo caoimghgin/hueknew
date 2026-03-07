@@ -1,3 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 180">
+
+  <!-- icon -->
+  <g transform="translate(90,90) scale(.65)">
+    
+    <path d="M0,0 L0,-110 A110,110 0 0,1 95,-55 Z" fill="#ff595e"></path>
+    <path d="M0,0 L95,-55 A110,110 0 0,1 95,55 Z" fill="#ffca3a"></path>
+    <path d="M0,0 L95,55 A110,110 0 0,1 0,110 Z" fill="#8ac926"></path>
+    <path d="M0,0 L0,110 A110,110 0 0,1 -95,55 Z" fill="#1982c4"></path>
+    <path d="M0,0 L-95,55 A110,110 0 0,1 -95,-55 Z" fill="#6a4c93"></path>
+    <path d="M0,0 L-95,-55 A110,110 0 0,1 0,-110 Z" fill="#ff924c"></path>
+
+    <circle r="45" fill="white"></circle>
+
+    <text x="0" y="18" text-anchor="middle" font-size="64" font-family="system-ui, sans-serif" font-weight="700" fill="#222">?</text>
+
+  </g>
+
+  <!-- wordmark -->
+  <text x="180" y="100" font-size="72" font-family="system-ui, sans-serif" font-weight="600" fill="#111">
+    HueKnew
+  </text>
+
+</svg>
+![logo](https://github.com/user-attachments/assets/7a408f53-a422-40d2-8d1d-df446b26ae36)
+
 # HueKnew
 
 **How many colors can the human eye actually see?**
