@@ -4,7 +4,7 @@
 
 The commonly cited answer — "about 10 million" — has never been rigorously computed. It traces back to rough estimates and interpolations from the 1940s. This project performs the actual count.
 
-**The answer is roughly 324,000.** The old folklore is off by about 30x.
+**The answer is roughly 272k.** The old folklore is off by about 30x.
 
 This repo contains the computation engine, pre-computed results, and interactive tools to explore them yourself.
 
@@ -44,9 +44,9 @@ Watch the dashboard at `:8084` as it discovers colors in real time. When it fini
 
 | Tier | ΔE2000 | Count | What it means |
 |------|--------|-------|---------------|
-| **JND** | 1.0 | **324,669** | Colors the eye can *theoretically* distinguish (lab conditions) |
-| **Acceptability** | 2.0 | **52,763** | Colors that are *meaningfully* different |
-| **Obvious** | 5.0 | **17,751** | Colors *anyone* would call different |
+| **JND** | 1.0 | **272,672** | Colors the eye can *theoretically* distinguish (lab conditions) |
+| **Acceptability** | 2.0 | **35,348** | Colors that are *meaningfully* different |
+| **Obvious** | 5.0 | **9,256** | Colors *anyone* would call different |
 
 ## How It Works
 
