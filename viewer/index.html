@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chromatic Census — Interactive Gamut Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #777777; color: #ccc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; top: 16px; left: 16px; z-index: 10;
+    background: rgba(0,0,0,0.7); padding: 16px 20px; border-radius: 8px;
+    backdrop-filter: blur(8px); max-width: 320px;
+    pointer-events: none;
+  }
+  #hud h1 { font-size: 14px; color: #fff; margin-bottom: 4px; font-weight: 600; }
+  #hud p { font-size: 12px; color: #999; line-height: 1.5; }
+  #hud .count { color: #fff; font-variant-numeric: tabular-nums; }
+  #controls {
+    position: fixed; bottom: 16px; left: 16px; z-index: 10;
+    background: rgba(0,0,0,0.7); padding: 12px 16px; border-radius: 8px;
+    backdrop-filter: blur(8px); font-size: 12px;
+  }
+  #controls label { display: block; margin-bottom: 8px; color: #999; }
+  #controls input[type=range] { width: 180px; vertical-align: middle; }
+  #controls .val { color: #fff; display: inline-block; width: 32px; text-align: right; }
+  #tier-picker {
+    position: fixed; top: 16px; right: 16px; z-index: 10;
+    background: rgba(0,0,0,0.7); padding: 12px 16px; border-radius: 8px;
+    backdrop-filter: blur(8px); font-size: 12px;
+  }
+  #tier-picker button {
+    display: block; width: 100%; padding: 6px 12px; margin-bottom: 4px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+    color: #ccc; border-radius: 4px; cursor: pointer; font-size: 12px; text-align: left;
+  }
+  #tier-picker button:hover { background: rgba(255,255,255,0.15); }
+  #tier-picker button.active { background: rgba(255,255,255,0.2); color: #fff; border-color: rgba(255,255,255,0.4); }
+  #camera-info {
+    position: fixed; bottom: 16px; right: 16px; z-index: 10;
+    background: rgba(0,0,0,0.7); padding: 10px 14px; border-radius: 8px;
+    backdrop-filter: blur(8px); font-size: 11px; color: #666;
+    font-variant-numeric: tabular-nums;
+  }
+  #gamut-overlays {
+    position: fixed; top: 16px; right: 260px; z-index: 10;
+    background: rgba(0,0,0,0.7); padding: 12px 16px; border-radius: 8px;
+    backdrop-filter: blur(8px); font-size: 12px;
+  }
+  #gamut-overlays .section-label {
+    color: #999; font-size: 10px; margin-bottom: 8px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  #gamut-overlays label {
+    display: flex; align-items: center; gap: 8px;
+    color: #ccc; margin-bottom: 6px; cursor: pointer;
+  }
+  #gamut-overlays label:hover { color: #fff; }
+  #gamut-overlays input[type=checkbox] { accent-color: #888; }
+  #gamut-overlays .swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+  }
+  #gamut-overlays .sub-controls {
+    margin: 4px 0 8px 22px; font-size: 11px; color: #666;
+  }
+  #gamut-overlays .sub-controls input[type=range] { width: 100px; vertical-align: middle; }
+  #gamut-overlays .sub-controls .val { color: #999; display: inline-block; width: 28px; text-align: right; }
+  #gamut-overlays .divider {
+    border-top: 1px solid rgba(255,255,255,0.1);
+    margin: 8px 0;
+  }
+  #coord-mode {
+    position: fixed; top: 130px; left: 16px; z-index: 10;
+    background: rgba(0,0,0,0.7); padding: 10px 14px; border-radius: 8px;
+    backdrop-filter: blur(8px); font-size: 12px;
+  }
+  #coord-mode .section-label {
+    color: #999; font-size: 10px; margin-bottom: 6px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  #coord-mode button {
+    padding: 5px 12px; margin-right: 4px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+    color: #ccc; border-radius: 4px; cursor: pointer; font-size: 12px;
+  }
+  #coord-mode button:hover { background: rgba(255,255,255,0.15); }
+  #coord-mode button.active { background: rgba(255,255,255,0.2); color: #fff; border-color: rgba(255,255,255,0.4); }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <h1>Chromatic Census — Gamut Viewer</h1>
+  <p>Every obviously distinguishable color: <span class="count" id="seed-count">—</span> seeds</p>
+  <p style="margin-top: 6px; color: #666;">Drag to orbit · Scroll to zoom · Right-drag to pan</p>
+</div>
+
+<div id="controls">
+  <label>Point size <input type="range" id="size-slider" min="0.5" max="8" step="0.25" value="2.5"> <span class="val" id="size-val">2.5</span></label>
+  <label>Opacity <input type="range" id="alpha-slider" min="0.1" max="1.0" step="0.05" value="1.0"> <span class="val" id="alpha-val">1.0</span></label>
+</div>
+
+<div id="tier-picker">
+  <div style="color:#999;font-size:10px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Tier</div>
+  <button class="active" data-tier="gf-obvious">Obvious</button>
+  <button data-tier="gf-acceptability">Acceptability</button>
+  <button data-tier="gf-jnd">JND</button>
+</div>
+
+<div id="gamut-overlays">
+  <div class="section-label">Gamut Overlays</div>
+  <label>
+    <input type="checkbox" id="toggle-srgb">
+    <span class="swatch" style="background:#fff;border:1px solid #666;"></span>
+    sRGB
+  </label>
+  <div class="sub-controls" id="srgb-controls" style="display:none;">
+    Opacity <input type="range" id="srgb-opacity" min="0.02" max="0.5" step="0.02" value="0.10">
+    <span class="val" id="srgb-opacity-val">0.10</span>
+  </div>
+  <label>
+    <input type="checkbox" id="toggle-adobe">
+    <span class="swatch" style="background:#00aaff;"></span>
+    Adobe RGB
+  </label>
+  <div class="sub-controls" id="adobe-controls" style="display:none;">
+    Opacity <input type="range" id="adobe-opacity" min="0.02" max="0.5" step="0.02" value="0.08">
+    <span class="val" id="adobe-opacity-val">0.08</span>
+  </div>
+  <label>
+    <input type="checkbox" id="toggle-p3">
+    <span class="swatch" style="background:#ff44cc;"></span>
+    Display P3
+  </label>
+  <div class="sub-controls" id="p3-controls" style="display:none;">
+    Opacity <input type="range" id="p3-opacity" min="0.02" max="0.5" step="0.02" value="0.08">
+    <span class="val" id="p3-opacity-val">0.08</span>
+  </div>
+  <div class="divider"></div>
+  <label>
+    <input type="checkbox" id="toggle-clip">
+    Clip to gamut
+  </label>
+  <div id="clip-info" style="display:none; margin: 2px 0 0 22px; font-size: 10px; color: #666;">
+    Hides seeds outside enabled gamut(s)
+  </div>
+</div>
+
+<div id="coord-mode">
+  <div class="section-label">Coordinate Space</div>
+  <button class="active" data-mode="lab">CIELAB</button>
+  <button data-mode="xyy">CIE xyY</button>
+</div>
+
+<div id="camera-info">Camera: <span id="cam-pos">—</span></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ============================================================
+// Constants
+// ============================================================
+
+const XYY_SCALE = 200;      // chromaticity (x, y) → scene units
+const XYY_Y_SCALE = 150;    // luminance Y → scene units (stretched for sail shape)
+
+const D65_Xn = 0.95047, D65_Yn = 1.00000, D65_Zn = 1.08883;
+
+// CIE 1931 2° spectral locus [wavelength, x, y] at 5nm intervals
+const SPECTRAL_LOCUS = [
+  [380,0.1741,0.0050],[385,0.1740,0.0050],[390,0.1738,0.0049],
+  [395,0.1736,0.0049],[400,0.1733,0.0048],[405,0.1730,0.0048],
+  [410,0.1726,0.0048],[415,0.1721,0.0048],[420,0.1714,0.0051],
+  [425,0.1703,0.0058],[430,0.1689,0.0069],[435,0.1669,0.0086],
+  [440,0.1644,0.0109],[445,0.1611,0.0138],[450,0.1566,0.0177],
+  [455,0.1510,0.0227],[460,0.1440,0.0297],[465,0.1355,0.0399],
+  [470,0.1241,0.0578],[475,0.1096,0.0868],[480,0.0913,0.1327],
+  [485,0.0687,0.2007],[490,0.0454,0.2950],[495,0.0235,0.4127],
+  [500,0.0082,0.5384],[505,0.0039,0.6548],[510,0.0139,0.7502],
+  [515,0.0389,0.8120],[520,0.0743,0.8338],[525,0.1142,0.8262],
+  [530,0.1547,0.8059],[535,0.1929,0.7816],[540,0.2296,0.7543],
+  [545,0.2658,0.7243],[550,0.3016,0.6923],[555,0.3373,0.6589],
+  [560,0.3731,0.6245],[565,0.4087,0.5896],[570,0.4441,0.5547],
+  [575,0.4788,0.5202],[580,0.5125,0.4866],[585,0.5448,0.4544],
+  [590,0.5752,0.4242],[595,0.6029,0.3965],[600,0.6270,0.3725],
+  [605,0.6482,0.3514],[610,0.6658,0.3340],[615,0.6801,0.3197],
+  [620,0.6915,0.3083],[625,0.7006,0.2993],[630,0.7079,0.2920],
+  [635,0.7140,0.2859],[640,0.7190,0.2809],[645,0.7230,0.2770],
+  [650,0.7260,0.2740],[655,0.7283,0.2717],[660,0.7300,0.2700],
+  [665,0.7311,0.2689],[670,0.7320,0.2680],[675,0.7327,0.2673],
+  [680,0.7334,0.2666],[685,0.7340,0.2660],[690,0.7344,0.2656],
+  [695,0.7346,0.2654],[700,0.7347,0.2653],
+];
+
+// ============================================================
+// Color conversion functions
+// ============================================================
+
+// --- CIELAB inverse ---
+function labToXyz(L, a, b) {
+  const delta = 6 / 29;
+  const delta_sq3 = 108 / 841;
+  const fy = (L + 16) / 116;
+  const fx = fy + a / 500;
+  const fz = fy - b / 200;
+  function finv(t) {
+    return t > delta ? t * t * t : delta_sq3 * (t - 16 / 116);
+  }
+  return [D65_Xn * finv(fx), D65_Yn * finv(fy), D65_Zn * finv(fz)];
+}
+
+// --- XYZ → xyY ---
+function xyzToXyy(X, Y, Z) {
+  const sum = X + Y + Z;
+  if (sum < 1e-10) return [0.3127, 0, 0.3290];  // D65 white at Y=0
+  return [X / sum, Y, Y / sum];
+}
+
+// --- CIELAB forward (for gamut shell building) ---
+function labF(t) {
+  return t > 0.008856452 ? Math.cbrt(t) : t / 0.12841855 + 4 / 29;
+}
+function xyzToLab(X, Y, Z) {
+  const fy = labF(Y / D65_Yn);
+  return [116 * fy - 16, 500 * (labF(X / D65_Xn) - fy), 200 * (fy - labF(Z / D65_Zn))];
+}
+
+// --- RGB color space conversions ---
+function srgbLinearize(c) {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+function adobeRgbLinearize(c) {
+  return Math.pow(c, 2.19921875);
+}
+// Display P3 uses the same transfer function as sRGB
+const p3Linearize = srgbLinearize;
+
+// RGB → XYZ matrices (forward)
+const SRGB_TO_XYZ = [
+  0.4124564, 0.3575761, 0.1804375,
+  0.2126729, 0.7151522, 0.0721750,
+  0.0193339, 0.1191920, 0.9503041,
+];
+const ADOBE_TO_XYZ = [
+  0.5767309, 0.1855540, 0.1881852,
+  0.2973769, 0.6273491, 0.0752741,
+  0.0270343, 0.0706872, 0.9911085,
+];
+// Display P3 (D65) → XYZ
+const P3_TO_XYZ = [
+  0.4865709, 0.2656677, 0.1982173,
+  0.2289746, 0.6917385, 0.0792869,
+  0.0000000, 0.0451134, 1.0439444,
+];
+
+// XYZ → linear RGB matrices (inverse, for gamut membership checks)
+const XYZ_TO_SRGB = [
+   3.2404542, -1.5371385, -0.4985314,
+  -0.9692660,  1.8760108,  0.0415560,
+   0.0556434, -0.2040259,  1.0572252,
+];
+const XYZ_TO_ADOBE = [
+   2.0413690, -0.5649464, -0.3446944,
+  -0.9692660,  1.8760108,  0.0415560,
+   0.0134474, -0.1183897,  1.0154096,
+];
+// XYZ → Display P3
+const XYZ_TO_P3 = [
+   2.4934969, -0.9313836, -0.4027108,
+  -0.8294890,  1.7626641,  0.0236247,
+   0.0358458, -0.0761724,  0.9568845,
+];
+
+function xyzInGamut(X, Y, Z, invMat) {
+  const r = invMat[0]*X + invMat[1]*Y + invMat[2]*Z;
+  const g = invMat[3]*X + invMat[4]*Y + invMat[5]*Z;
+  const b = invMat[6]*X + invMat[7]*Y + invMat[8]*Z;
+  const tol = 1e-4;
+  return r >= -tol && r <= 1+tol && g >= -tol && g <= 1+tol && b >= -tol && b <= 1+tol;
+}
+
+function linearRgbToXyz(r, g, b, m) {
+  return [m[0]*r + m[1]*g + m[2]*b, m[3]*r + m[4]*g + m[5]*b, m[6]*r + m[7]*g + m[8]*b];
+}
+
+// --- Convert an RGB point to a 3D scene position ---
+function rgbTo3D(r, g, b, linearize, matrix, mode) {
+  const rl = linearize(r), gl = linearize(g), bl = linearize(b);
+  const [X, Y, Z] = linearRgbToXyz(rl, gl, bl, matrix);
+  if (mode === 'xyy') {
+    const [cx, cY, cy] = xyzToXyy(X, Y, Z);
+    return [cx * XYY_SCALE, cY * XYY_Y_SCALE, cy * XYY_SCALE];
+  }
+  const [L, a, bv] = xyzToLab(X, Y, Z);
+  return [a, L, bv];  // x=a*, y=L*, z=b*
+}
+
+// --- Convert a Lab point to a 3D scene position ---
+function labTo3D(L, a, b, mode) {
+  if (mode === 'lab') return [a, L, b];
+  const [X, Y, Z] = labToXyz(L, a, b);
+  const [cx, cY, cy] = xyzToXyy(X, Y, Z);
+  return [cx * XYY_SCALE, cY * XYY_Y_SCALE, cy * XYY_SCALE];
+}
+
+// ============================================================
+// Data paths
+// ============================================================
+const TIER_FILES = {
+  'gf-obvious': '../data/obvious.csv',
+  'gf-acceptability': '../data/acceptability.csv',
+  'gf-jnd': '../data/jnd.csv',
+};
+
+// ============================================================
+// Scene setup
+// ============================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x777777);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 1000);
+camera.position.set(80, 60, 120);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+const orbitControls = new OrbitControls(camera, renderer.domElement);
+orbitControls.enableDamping = true;
+orbitControls.dampingFactor = 0.08;
+orbitControls.target.set(0, 50, 0);
+orbitControls.update();
+
+// ============================================================
+// State
+// ============================================================
+let currentPoints = null;
+let currentTier = 'gf-obvious';
+let currentMode = 'lab';   // 'lab' or 'xyy'
+let pointSize = 2.5;
+let pointAlpha = 1.0;
+const tierCache = {};       // tier → { labValues, colors, gamutFlags, count }
+let srgbVisible = false;
+let adobeVisible = false;
+let p3Visible = false;
+let clipToGamut = false;
+
+// ============================================================
+// Custom shader for per-vertex alpha (used for gamut clipping)
+// ============================================================
+const pointVertexShader = `
+  attribute float pointAlpha;
+  varying vec3 vColor;
+  varying float vAlpha;
+  uniform float uSize;
+  uniform float uScale;
+  void main() {
+    vColor = color;
+    vAlpha = pointAlpha;
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = uSize * (uScale / -mvPos.z);
+    gl_Position = projectionMatrix * mvPos;
+  }
+`;
+const pointFragmentShader = `
+  varying vec3 vColor;
+  varying float vAlpha;
+  uniform float uOpacity;
+  void main() {
+    float a = vAlpha * uOpacity;
+    if (a < 0.01) discard;
+    gl_FragColor = vec4(vColor, a);
+  }
+`;
+
+// ============================================================
+// Parse CSV — stores raw Lab values + gamut membership flags
+// ============================================================
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  const header = lines[0].split(',');
+  const iL = header.indexOf('L');
+  const ia = header.indexOf('a');
+  const ib = header.indexOf('b');
+  const iHex = header.indexOf('hex_srgb');
+
+  const count = lines.length - 1;
+  const labValues = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const gamutFlags = new Uint8Array(count);  // bit 0 = sRGB, bit 1 = Adobe RGB, bit 2 = P3
+  const tmpColor = new THREE.Color();
+
+  for (let i = 1; i <= count; i++) {
+    const cols = lines[i].split(',');
+    const L = parseFloat(cols[iL]);
+    const a = parseFloat(cols[ia]);
+    const b = parseFloat(cols[ib]);
+    const hex = cols[iHex];
+
+    const idx = (i - 1) * 3;
+    labValues[idx]     = L;
+    labValues[idx + 1] = a;
+    labValues[idx + 2] = b;
+
+    tmpColor.set(hex);
+    colors[idx]     = tmpColor.r;
+    colors[idx + 1] = tmpColor.g;
+    colors[idx + 2] = tmpColor.b;
+
+    // Gamut membership check
+    const [X, Y, Z] = labToXyz(L, a, b);
+    let flags = 0;
+    if (xyzInGamut(X, Y, Z, XYZ_TO_SRGB))  flags |= 1;
+    if (xyzInGamut(X, Y, Z, XYZ_TO_ADOBE))  flags |= 2;
+    if (xyzInGamut(X, Y, Z, XYZ_TO_P3))    flags |= 4;
+    gamutFlags[i - 1] = flags;
+  }
+
+  return { labValues, colors, gamutFlags, count };
+}
+
+// ============================================================
+// Build positions from Lab values in current mode
+// ============================================================
+function computePositions(labValues, count, mode) {
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const idx = i * 3;
+    const L = labValues[idx], a = labValues[idx + 1], b = labValues[idx + 2];
+    const [px, py, pz] = labTo3D(L, a, b, mode);
+    positions[idx]     = px;
+    positions[idx + 1] = py;
+    positions[idx + 2] = pz;
+  }
+  return positions;
+}
+
+// ============================================================
+// Compute per-vertex alpha based on clip state
+// ============================================================
+function computeAlphas(gamutFlags, count) {
+  const alphas = new Float32Array(count);
+  if (!clipToGamut) {
+    alphas.fill(1.0);
+    return alphas;
+  }
+  // Determine which gamuts to clip against
+  const checkSrgb = srgbVisible;
+  const checkAdobe = adobeVisible;
+  const checkP3 = p3Visible;
+  // If clip is on but no gamut is enabled, show everything
+  if (!checkSrgb && !checkAdobe && !checkP3) {
+    alphas.fill(1.0);
+    return alphas;
+  }
+  for (let i = 0; i < count; i++) {
+    const f = gamutFlags[i];
+    let visible = false;
+    if (checkSrgb && (f & 1))  visible = true;
+    if (checkAdobe && (f & 2)) visible = true;
+    if (checkP3 && (f & 4))   visible = true;
+    alphas[i] = visible ? 1.0 : 0.0;
+  }
+  return alphas;
+}
+
+// ============================================================
+// Create/update point cloud
+// ============================================================
+function getUScale() {
+  return renderer.getPixelRatio() * window.innerHeight * 0.5;
+}
+
+function buildPointCloud(data) {
+  if (currentPoints) {
+    scene.remove(currentPoints);
+    currentPoints.geometry.dispose();
+    currentPoints.material.dispose();
+  }
+
+  const positions = computePositions(data.labValues, data.count, currentMode);
+  const alphas = computeAlphas(data.gamutFlags, data.count);
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+  geometry.setAttribute('pointAlpha', new THREE.BufferAttribute(alphas, 1));
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uSize: { value: pointSize },
+      uScale: { value: getUScale() },
+      uOpacity: { value: pointAlpha },
+    },
+    vertexShader: pointVertexShader,
+    fragmentShader: pointFragmentShader,
+    vertexColors: true,
+    transparent: true,
+    depthWrite: pointAlpha > 0.95 && !clipToGamut,
+  });
+
+  currentPoints = new THREE.Points(geometry, material);
+  scene.add(currentPoints);
+
+  document.getElementById('seed-count').textContent = data.count.toLocaleString();
+}
+
+// ============================================================
+// Update clip alphas without rebuilding entire point cloud
+// ============================================================
+function updateClipAlphas() {
+  if (!currentPoints || !tierCache[currentTier]) return;
+  const data = tierCache[currentTier];
+  const alphas = computeAlphas(data.gamutFlags, data.count);
+  const attr = currentPoints.geometry.getAttribute('pointAlpha');
+  attr.array.set(alphas);
+  attr.needsUpdate = true;
+  currentPoints.material.depthWrite = pointAlpha > 0.95 && !clipToGamut;
+}
+
+// ============================================================
+// Load tier
+// ============================================================
+async function loadTier(tier) {
+  if (tierCache[tier]) {
+    buildPointCloud(tierCache[tier]);
+    return;
+  }
+  document.getElementById('seed-count').textContent = 'loading…';
+  const resp = await fetch(TIER_FILES[tier]);
+  const text = await resp.text();
+  const data = parseCSV(text);
+  tierCache[tier] = data;
+  buildPointCloud(data);
+}
+
+// ============================================================
+// Gamut boundary mesh builders
+// ============================================================
+
+function buildGamutBoundary(linearize, matrix, gridSize, mode) {
+  const faces = [
+    { fixed: 0, val: 0 }, { fixed: 0, val: 1 },
+    { fixed: 1, val: 0 }, { fixed: 1, val: 1 },
+    { fixed: 2, val: 0 }, { fixed: 2, val: 1 },
+  ];
+  const positions = [];
+  const indices = [];
+
+  for (const face of faces) {
+    const base = positions.length / 3;
+    const free = [0, 1, 2].filter(k => k !== face.fixed);
+
+    for (let i = 0; i <= gridSize; i++) {
+      for (let j = 0; j <= gridSize; j++) {
+        const rgb = [0, 0, 0];
+        rgb[face.fixed] = face.val;
+        rgb[free[0]] = i / gridSize;
+        rgb[free[1]] = j / gridSize;
+        const [px, py, pz] = rgbTo3D(rgb[0], rgb[1], rgb[2], linearize, matrix, mode);
+        positions.push(px, py, pz);
+      }
+    }
+
+    const stride = gridSize + 1;
+    for (let i = 0; i < gridSize; i++) {
+      for (let j = 0; j < gridSize; j++) {
+        const v0 = base + i * stride + j;
+        indices.push(v0, v0 + 1, v0 + stride);
+        indices.push(v0 + 1, v0 + stride + 1, v0 + stride);
+      }
+    }
+  }
+  return { positions: new Float32Array(positions), indices: new Uint32Array(indices) };
+}
+
+function buildGamutEdges(linearize, matrix, segments, mode) {
+  const edgePositions = [];
+  const edges = [
+    [[1,0],[2,0]], [[1,0],[2,1]], [[1,1],[2,0]], [[1,1],[2,1]],
+    [[0,0],[2,0]], [[0,0],[2,1]], [[0,1],[2,0]], [[0,1],[2,1]],
+    [[0,0],[1,0]], [[0,0],[1,1]], [[0,1],[1,0]], [[0,1],[1,1]],
+  ];
+
+  for (const [fix1, fix2] of edges) {
+    const varyIdx = [0,1,2].find(i => i !== fix1[0] && i !== fix2[0]);
+    for (let s = 0; s < segments; s++) {
+      for (const t of [s / segments, (s + 1) / segments]) {
+        const rgb = [0, 0, 0];
+        rgb[fix1[0]] = fix1[1];
+        rgb[fix2[0]] = fix2[1];
+        rgb[varyIdx] = t;
+        const [px, py, pz] = rgbTo3D(rgb[0], rgb[1], rgb[2], linearize, matrix, mode);
+        edgePositions.push(px, py, pz);
+      }
+    }
+  }
+  return new Float32Array(edgePositions);
+}
+
+function createGamutShell(linearize, matrix, fillColor, edgeColor, fillOpacity, mode) {
+  const GRID = 64, EDGE_SEGS = 64;
+
+  const boundary = buildGamutBoundary(linearize, matrix, GRID, mode);
+  const edgeData = buildGamutEdges(linearize, matrix, EDGE_SEGS, mode);
+
+  const fillGeom = new THREE.BufferGeometry();
+  fillGeom.setAttribute('position', new THREE.BufferAttribute(boundary.positions, 3));
+  fillGeom.setIndex(new THREE.BufferAttribute(boundary.indices, 1));
+  fillGeom.computeVertexNormals();
+
+  const fillMat = new THREE.MeshBasicMaterial({
+    color: fillColor, transparent: true, opacity: fillOpacity,
+    side: THREE.DoubleSide, depthWrite: false,
+  });
+  const fillMesh = new THREE.Mesh(fillGeom, fillMat);
+
+  const edgeGeom = new THREE.BufferGeometry();
+  edgeGeom.setAttribute('position', new THREE.BufferAttribute(edgeData, 3));
+  const edgeMat = new THREE.LineBasicMaterial({
+    color: edgeColor, transparent: true, opacity: 0.6,
+  });
+  const edgeLines = new THREE.LineSegments(edgeGeom, edgeMat);
+
+  const group = new THREE.Group();
+  group.add(fillMesh);
+  group.add(edgeLines);
+  group.visible = false;
+  return { group, fillMat, edgeMat };
+}
+
+// ============================================================
+// Spectral locus (horseshoe outline at Y=0 base plane, xyY mode only)
+// ============================================================
+
+function buildSpectralLocus() {
+  const points = [];
+
+  // Spectral locus curve
+  for (const [, x, y] of SPECTRAL_LOCUS) {
+    points.push(new THREE.Vector3(x * XYY_SCALE, 0, y * XYY_SCALE));
+  }
+  // Purple line: close the horseshoe (700nm → 380nm)
+  points.push(points[0].clone());
+
+  const geom = new THREE.BufferGeometry().setFromPoints(points);
+  const mat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+  const line = new THREE.Line(geom, mat);
+
+  const group = new THREE.Group();
+  group.add(line);
+  group.visible = false;
+  return group;
+}
+
+// ============================================================
+// L* axis rod (Lab mode only)
+// ============================================================
+
+function buildLabRod() {
+  const rodGeom = new THREE.CylinderGeometry(0.3, 0.3, 100, 8);
+  const rodMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const rod = new THREE.Mesh(rodGeom, rodMat);
+  rod.position.set(0, 50, 0);
+  return rod;
+}
+
+// ============================================================
+// Build all static geometry
+// ============================================================
+
+// Gamut shells: build for both modes
+const shells = {
+  srgb: {
+    lab: createGamutShell(srgbLinearize, SRGB_TO_XYZ, 0xffffff, 0xffffff, 0.10, 'lab'),
+    xyy: createGamutShell(srgbLinearize, SRGB_TO_XYZ, 0xffffff, 0xffffff, 0.10, 'xyy'),
+  },
+  adobe: {
+    lab: createGamutShell(adobeRgbLinearize, ADOBE_TO_XYZ, 0x00aaff, 0x00aaff, 0.08, 'lab'),
+    xyy: createGamutShell(adobeRgbLinearize, ADOBE_TO_XYZ, 0x00aaff, 0x00aaff, 0.08, 'xyy'),
+  },
+  p3: {
+    lab: createGamutShell(p3Linearize, P3_TO_XYZ, 0xff44cc, 0xff44cc, 0.08, 'lab'),
+    xyy: createGamutShell(p3Linearize, P3_TO_XYZ, 0xff44cc, 0xff44cc, 0.08, 'xyy'),
+  },
+};
+
+// Add all shell groups to scene (visibility managed per mode)
+scene.add(shells.srgb.lab.group);
+scene.add(shells.srgb.xyy.group);
+scene.add(shells.adobe.lab.group);
+scene.add(shells.adobe.xyy.group);
+scene.add(shells.p3.lab.group);
+scene.add(shells.p3.xyy.group);
+
+// Spectral locus (xyY only)
+const spectralLocus = buildSpectralLocus();
+scene.add(spectralLocus);
+
+// L* rod (Lab only)
+const labRod = buildLabRod();
+scene.add(labRod);
+
+// ============================================================
+// Mode switching
+// ============================================================
+
+function switchMode(mode) {
+  if (mode === currentMode) return;
+  currentMode = mode;
+
+  // Rebuild point cloud in new coordinates
+  if (tierCache[currentTier]) {
+    buildPointCloud(tierCache[currentTier]);
+  }
+
+  // Update gamut shell visibility
+  updateShellVisibility();
+
+  // Toggle mode-specific geometry
+  labRod.visible = (mode === 'lab');
+  spectralLocus.visible = (mode === 'xyy');
+
+  // Move camera to a good default for the mode
+  if (mode === 'lab') {
+    camera.position.set(80, 60, 120);
+    orbitControls.target.set(0, 50, 0);
+  } else {
+    // xyY: center on the gamut centroid
+    camera.position.set(140, 120, 200);
+    orbitControls.target.set(70, 50, 70);
+  }
+  orbitControls.update();
+
+  // Update button states
+  document.querySelectorAll('#coord-mode button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === mode);
+  });
+}
+
+function updateShellVisibility() {
+  // sRGB: show the correct mode's group, hide the other
+  shells.srgb.lab.group.visible = srgbVisible && currentMode === 'lab';
+  shells.srgb.xyy.group.visible = srgbVisible && currentMode === 'xyy';
+  shells.adobe.lab.group.visible = adobeVisible && currentMode === 'lab';
+  shells.adobe.xyy.group.visible = adobeVisible && currentMode === 'xyy';
+  shells.p3.lab.group.visible = p3Visible && currentMode === 'lab';
+  shells.p3.xyy.group.visible = p3Visible && currentMode === 'xyy';
+}
+
+// ============================================================
+// UI wiring
+// ============================================================
+
+// Point size
+const sizeSlider = document.getElementById('size-slider');
+const sizeVal = document.getElementById('size-val');
+sizeSlider.addEventListener('input', () => {
+  pointSize = parseFloat(sizeSlider.value);
+  sizeVal.textContent = pointSize.toFixed(1);
+  if (currentPoints) currentPoints.material.uniforms.uSize.value = pointSize;
+});
+
+// Point opacity
+const alphaSlider = document.getElementById('alpha-slider');
+const alphaVal = document.getElementById('alpha-val');
+alphaSlider.addEventListener('input', () => {
+  pointAlpha = parseFloat(alphaSlider.value);
+  alphaVal.textContent = pointAlpha.toFixed(2);
+  if (currentPoints) {
+    currentPoints.material.uniforms.uOpacity.value = pointAlpha;
+    currentPoints.material.depthWrite = pointAlpha > 0.95 && !clipToGamut;
+  }
+});
+
+// Tier picker
+document.querySelectorAll('#tier-picker button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelector('#tier-picker button.active').classList.remove('active');
+    btn.classList.add('active');
+    currentTier = btn.dataset.tier;
+    loadTier(currentTier);
+  });
+});
+
+// Coordinate mode
+document.querySelectorAll('#coord-mode button').forEach(btn => {
+  btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+});
+
+// Gamut overlays
+const toggleSrgb = document.getElementById('toggle-srgb');
+const toggleAdobe = document.getElementById('toggle-adobe');
+const toggleP3 = document.getElementById('toggle-p3');
+const toggleClip = document.getElementById('toggle-clip');
+const srgbControlsEl = document.getElementById('srgb-controls');
+const adobeControlsEl = document.getElementById('adobe-controls');
+const p3ControlsEl = document.getElementById('p3-controls');
+const clipInfoEl = document.getElementById('clip-info');
+
+toggleSrgb.addEventListener('change', () => {
+  srgbVisible = toggleSrgb.checked;
+  srgbControlsEl.style.display = srgbVisible ? 'block' : 'none';
+  updateShellVisibility();
+  if (clipToGamut) updateClipAlphas();
+});
+toggleAdobe.addEventListener('change', () => {
+  adobeVisible = toggleAdobe.checked;
+  adobeControlsEl.style.display = adobeVisible ? 'block' : 'none';
+  updateShellVisibility();
+  if (clipToGamut) updateClipAlphas();
+});
+toggleP3.addEventListener('change', () => {
+  p3Visible = toggleP3.checked;
+  p3ControlsEl.style.display = p3Visible ? 'block' : 'none';
+  updateShellVisibility();
+  if (clipToGamut) updateClipAlphas();
+});
+
+toggleClip.addEventListener('change', () => {
+  clipToGamut = toggleClip.checked;
+  clipInfoEl.style.display = clipToGamut ? 'block' : 'none';
+  updateClipAlphas();
+});
+
+// Gamut opacity sliders
+const srgbOpSlider = document.getElementById('srgb-opacity');
+const srgbOpVal = document.getElementById('srgb-opacity-val');
+srgbOpSlider.addEventListener('input', () => {
+  const v = parseFloat(srgbOpSlider.value);
+  srgbOpVal.textContent = v.toFixed(2);
+  shells.srgb.lab.fillMat.opacity = v;
+  shells.srgb.xyy.fillMat.opacity = v;
+});
+
+const adobeOpSlider = document.getElementById('adobe-opacity');
+const adobeOpVal = document.getElementById('adobe-opacity-val');
+adobeOpSlider.addEventListener('input', () => {
+  const v = parseFloat(adobeOpSlider.value);
+  adobeOpVal.textContent = v.toFixed(2);
+  shells.adobe.lab.fillMat.opacity = v;
+  shells.adobe.xyy.fillMat.opacity = v;
+});
+
+const p3OpSlider = document.getElementById('p3-opacity');
+const p3OpVal = document.getElementById('p3-opacity-val');
+p3OpSlider.addEventListener('input', () => {
+  const v = parseFloat(p3OpSlider.value);
+  p3OpVal.textContent = v.toFixed(2);
+  shells.p3.lab.fillMat.opacity = v;
+  shells.p3.xyy.fillMat.opacity = v;
+});
+
+// ============================================================
+// Camera info
+// ============================================================
+const camInfo = document.getElementById('cam-pos');
+function updateCamInfo() {
+  const p = camera.position;
+  const d = p.length();
+  const elev = Math.asin(p.y / d) * (180 / Math.PI);
+  const azim = Math.atan2(p.x, p.z) * (180 / Math.PI);
+  camInfo.textContent = `elev ${elev.toFixed(0)}° azim ${azim.toFixed(0)}° dist ${d.toFixed(0)}`;
+}
+
+// ============================================================
+// Resize
+// ============================================================
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  if (currentPoints) {
+    currentPoints.material.uniforms.uScale.value = getUScale();
+  }
+});
+
+// ============================================================
+// Animate
+// ============================================================
+function animate() {
+  requestAnimationFrame(animate);
+  orbitControls.update();
+  updateCamInfo();
+  renderer.render(scene, camera);
+}
+
+// ============================================================
+// Boot
+// ============================================================
+loadTier('gf-obvious');
+animate();
+</script>
+</body>
+</html>
