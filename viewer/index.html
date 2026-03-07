@@ -167,6 +167,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
 // ============================================================
 // Constants
@@ -336,6 +337,13 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 document.body.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(innerWidth, innerHeight);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0';
+labelRenderer.domElement.style.pointerEvents = 'none';
+document.body.appendChild(labelRenderer.domElement);
 
 const orbitControls = new OrbitControls(camera, renderer.domElement);
 orbitControls.enableDamping = true;
@@ -666,15 +674,87 @@ function buildSpectralLocus() {
 }
 
 // ============================================================
-// L* axis rod (Lab mode only)
+// Lab axes with labels and ground grid
 // ============================================================
 
-function buildLabRod() {
-  const rodGeom = new THREE.CylinderGeometry(0.3, 0.3, 100, 8);
-  const rodMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const rod = new THREE.Mesh(rodGeom, rodMat);
-  rod.position.set(0, 50, 0);
-  return rod;
+function makeAxisLabel(text, fontSize) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  div.style.cssText = `color:#fff; font-size:${fontSize || 13}px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-weight:600; text-shadow:0 0 4px rgba(0,0,0,0.8);`;
+  return new CSS2DObject(div);
+}
+
+function makeTickLabel(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  div.style.cssText = 'color:#999; font-size:10px; font-family:-apple-system,BlinkMacSystemFont,sans-serif; text-shadow:0 0 3px rgba(0,0,0,0.8);';
+  return new CSS2DObject(div);
+}
+
+const labCssLabels = [];  // track CSS2D objects for manual hide/show
+
+function buildLabAxes() {
+  const group = new THREE.Group();
+  const axisColor = 0xaaaaaa;
+  const axisMat = new THREE.LineBasicMaterial({ color: axisColor, transparent: true, opacity: 0.6 });
+  const tickMat = new THREE.LineBasicMaterial({ color: axisColor, transparent: true, opacity: 0.3 });
+
+  // L* axis (vertical, y = 0..100)
+  const lGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 100, 0)
+  ]);
+  group.add(new THREE.Line(lGeom, axisMat));
+  function addLabel(label) { group.add(label); labCssLabels.push(label); }
+
+  const lLabel = makeAxisLabel('L*');
+  lLabel.position.set(0, 105, 0);
+  addLabel(lLabel);
+
+  // a* axis (x = -128..127, at y=0)
+  const aGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-128, 0, 0), new THREE.Vector3(127, 0, 0)
+  ]);
+  group.add(new THREE.Line(aGeom, axisMat));
+  const aLabel = makeAxisLabel('a*');
+  aLabel.position.set(135, 0, 0);
+  addLabel(aLabel);
+  const aNegLabel = makeAxisLabel('−a*', 11);
+  aNegLabel.position.set(-138, 0, 0);
+  addLabel(aNegLabel);
+
+  // b* axis (z = -128..127, at y=0)
+  const bGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, -128), new THREE.Vector3(0, 0, 127)
+  ]);
+  group.add(new THREE.Line(bGeom, axisMat));
+  const bLabel = makeAxisLabel('b*');
+  bLabel.position.set(0, 0, 135);
+  addLabel(bLabel);
+  const bNegLabel = makeAxisLabel('−b*', 11);
+  bNegLabel.position.set(0, 0, -138);
+  addLabel(bNegLabel);
+
+  // Tick marks on L*
+  for (const v of [0, 25, 50, 75, 100]) {
+    const tick = makeTickLabel(String(v));
+    tick.position.set(-5, v, 0);
+    addLabel(tick);
+  }
+
+  // Ground grid on the a*-b* plane (y=0)
+  const gridExtent = 125;
+  const gridStep = 25;
+  const gridPoints = [];
+  for (let v = -gridExtent; v <= gridExtent; v += gridStep) {
+    gridPoints.push(-gridExtent, 0, v, gridExtent, 0, v);
+    gridPoints.push(v, 0, -gridExtent, v, 0, gridExtent);
+  }
+  const gridGeom = new THREE.BufferGeometry();
+  gridGeom.setAttribute('position', new THREE.Float32BufferAttribute(gridPoints, 3));
+  const gridMat = new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.15 });
+  group.add(new THREE.LineSegments(gridGeom, gridMat));
+
+  return group;
 }
 
 // ============================================================
@@ -709,9 +789,9 @@ scene.add(shells.p3.xyy.group);
 const spectralLocus = buildSpectralLocus();
 scene.add(spectralLocus);
 
-// L* rod (Lab only)
-const labRod = buildLabRod();
-scene.add(labRod);
+// Lab axes (Lab only)
+const labAxes = buildLabAxes();
+scene.add(labAxes);
 
 // ============================================================
 // Mode switching
@@ -730,7 +810,8 @@ function switchMode(mode) {
   updateShellVisibility();
 
   // Toggle mode-specific geometry
-  labRod.visible = (mode === 'lab');
+  labAxes.visible = (mode === 'lab');
+  labCssLabels.forEach(l => { l.element.style.display = mode === 'lab' ? '' : 'none'; });
   spectralLocus.visible = (mode === 'xyy');
 
   // Move camera to a good default for the mode
@@ -882,6 +963,7 @@ window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  labelRenderer.setSize(innerWidth, innerHeight);
   if (currentPoints) {
     currentPoints.material.uniforms.uScale.value = getUScale();
   }
@@ -895,6 +977,7 @@ function animate() {
   orbitControls.update();
   updateCamInfo();
   renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
 }
 
 // ============================================================
