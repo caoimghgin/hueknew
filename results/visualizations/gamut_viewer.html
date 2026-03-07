@@ -102,16 +102,14 @@
 </div>
 
 <div id="tier-picker">
-  <div style="color:#999;font-size:10px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">MacAdam-fixed (ultrafine)</div>
-  <button class="active" data-tier="uf-obvious">Obvious (8,687)</button>
+  <div style="color:#9f9;font-size:10px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Final (gap-filled)</div>
+  <button class="active" data-tier="gf-obvious">Obvious (9,256)</button>
+  <button data-tier="gf-acceptability">Acceptability (35,348)</button>
+  <button data-tier="gf-jnd">JND (272,672)</button>
+  <div style="color:#999;font-size:10px;margin:8px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">MacAdam-fixed (ultrafine)</div>
+  <button data-tier="uf-obvious">Obvious (8,687)</button>
   <button data-tier="uf-acceptability">Acceptability (33,509)</button>
   <button data-tier="uf-jnd">JND (269,812)</button>
-  <div style="color:#666;font-size:10px;margin:8px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">MacAdam-fixed (coarse)</div>
-  <button data-tier="macadam-obvious">Obvious — coarse (39,164)</button>
-  <button data-tier="macadam-jnd">JND — coarse (196,942)</button>
-  <div style="color:#555;font-size:10px;margin:8px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Original (pre-MacAdam)</div>
-  <button data-tier="obvious">Obvious — original (17,313)</button>
-  <button data-tier="jnd">JND — original (321,930)</button>
 </div>
 
 <div id="gamut-overlays">
@@ -133,6 +131,15 @@
   <div class="sub-controls" id="adobe-controls" style="display:none;">
     Opacity <input type="range" id="adobe-opacity" min="0.02" max="0.5" step="0.02" value="0.08">
     <span class="val" id="adobe-opacity-val">0.08</span>
+  </div>
+  <label>
+    <input type="checkbox" id="toggle-p3">
+    <span class="swatch" style="background:#ff44cc;"></span>
+    Display P3
+  </label>
+  <div class="sub-controls" id="p3-controls" style="display:none;">
+    Opacity <input type="range" id="p3-opacity" min="0.02" max="0.5" step="0.02" value="0.08">
+    <span class="val" id="p3-opacity-val">0.08</span>
   </div>
   <div class="divider"></div>
   <label>
@@ -240,6 +247,8 @@ function srgbLinearize(c) {
 function adobeRgbLinearize(c) {
   return Math.pow(c, 2.19921875);
 }
+// Display P3 uses the same transfer function as sRGB
+const p3Linearize = srgbLinearize;
 
 // RGB → XYZ matrices (forward)
 const SRGB_TO_XYZ = [
@@ -252,6 +261,12 @@ const ADOBE_TO_XYZ = [
   0.2973769, 0.6273491, 0.0752741,
   0.0270343, 0.0706872, 0.9911085,
 ];
+// Display P3 (D65) → XYZ
+const P3_TO_XYZ = [
+  0.4865709, 0.2656677, 0.1982173,
+  0.2289746, 0.6917385, 0.0792869,
+  0.0000000, 0.0451134, 1.0439444,
+];
 
 // XYZ → linear RGB matrices (inverse, for gamut membership checks)
 const XYZ_TO_SRGB = [
@@ -263,6 +278,12 @@ const XYZ_TO_ADOBE = [
    2.0413690, -0.5649464, -0.3446944,
   -0.9692660,  1.8760108,  0.0415560,
    0.0134474, -0.1183897,  1.0154096,
+];
+// XYZ → Display P3
+const XYZ_TO_P3 = [
+   2.4934969, -0.9313836, -0.4027108,
+  -0.8294890,  1.7626641,  0.0236247,
+   0.0358458, -0.0761724,  0.9568845,
 ];
 
 function xyzInGamut(X, Y, Z, invMat) {
@@ -301,13 +322,12 @@ function labTo3D(L, a, b, mode) {
 // Data paths
 // ============================================================
 const TIER_FILES = {
+  'gf-obvious': '../exports/gapfill-macadam-obvious.csv',
+  'gf-acceptability': '../exports/gapfill-macadam-acceptability.csv',
+  'gf-jnd': '../exports/gapfill-macadam-JND.csv',
   'uf-obvious': '../exports/ultrafine-macadam-obvious.csv',
   'uf-acceptability': '../exports/ultrafine-macadam-acceptability.csv',
   'uf-jnd': '../exports/ultrafine-macadam-JND.csv',
-  'macadam-obvious': '../exports/coarse-macadam-obvious.csv',
-  'macadam-jnd': '../exports/coarse-macadam-jnd.csv',
-  obvious: '../exports/chromatic-census-ultrafine-obvious-de5.0.csv',
-  jnd: '../exports/chromatic-census-ultrafine-jnd-de1.0.csv',
 };
 
 // ============================================================
@@ -334,13 +354,14 @@ orbitControls.update();
 // State
 // ============================================================
 let currentPoints = null;
-let currentTier = 'uf-obvious';
+let currentTier = 'gf-obvious';
 let currentMode = 'lab';   // 'lab' or 'xyy'
 let pointSize = 2.5;
 let pointAlpha = 1.0;
 const tierCache = {};       // tier → { labValues, colors, gamutFlags, count }
 let srgbVisible = false;
 let adobeVisible = false;
+let p3Visible = false;
 let clipToGamut = false;
 
 // ============================================================
@@ -385,7 +406,7 @@ function parseCSV(text) {
   const count = lines.length - 1;
   const labValues = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
-  const gamutFlags = new Uint8Array(count);  // bit 0 = sRGB, bit 1 = Adobe RGB
+  const gamutFlags = new Uint8Array(count);  // bit 0 = sRGB, bit 1 = Adobe RGB, bit 2 = P3
   const tmpColor = new THREE.Color();
 
   for (let i = 1; i <= count; i++) {
@@ -410,6 +431,7 @@ function parseCSV(text) {
     let flags = 0;
     if (xyzInGamut(X, Y, Z, XYZ_TO_SRGB))  flags |= 1;
     if (xyzInGamut(X, Y, Z, XYZ_TO_ADOBE))  flags |= 2;
+    if (xyzInGamut(X, Y, Z, XYZ_TO_P3))    flags |= 4;
     gamutFlags[i - 1] = flags;
   }
 
@@ -444,8 +466,9 @@ function computeAlphas(gamutFlags, count) {
   // Determine which gamuts to clip against
   const checkSrgb = srgbVisible;
   const checkAdobe = adobeVisible;
+  const checkP3 = p3Visible;
   // If clip is on but no gamut is enabled, show everything
-  if (!checkSrgb && !checkAdobe) {
+  if (!checkSrgb && !checkAdobe && !checkP3) {
     alphas.fill(1.0);
     return alphas;
   }
@@ -454,6 +477,7 @@ function computeAlphas(gamutFlags, count) {
     let visible = false;
     if (checkSrgb && (f & 1))  visible = true;
     if (checkAdobe && (f & 2)) visible = true;
+    if (checkP3 && (f & 4))   visible = true;
     alphas[i] = visible ? 1.0 : 0.0;
   }
   return alphas;
@@ -674,6 +698,10 @@ const shells = {
     lab: createGamutShell(adobeRgbLinearize, ADOBE_TO_XYZ, 0x00aaff, 0x00aaff, 0.08, 'lab'),
     xyy: createGamutShell(adobeRgbLinearize, ADOBE_TO_XYZ, 0x00aaff, 0x00aaff, 0.08, 'xyy'),
   },
+  p3: {
+    lab: createGamutShell(p3Linearize, P3_TO_XYZ, 0xff44cc, 0xff44cc, 0.08, 'lab'),
+    xyy: createGamutShell(p3Linearize, P3_TO_XYZ, 0xff44cc, 0xff44cc, 0.08, 'xyy'),
+  },
 };
 
 // Add all shell groups to scene (visibility managed per mode)
@@ -681,6 +709,8 @@ scene.add(shells.srgb.lab.group);
 scene.add(shells.srgb.xyy.group);
 scene.add(shells.adobe.lab.group);
 scene.add(shells.adobe.xyy.group);
+scene.add(shells.p3.lab.group);
+scene.add(shells.p3.xyy.group);
 
 // Spectral locus (xyY only)
 const spectralLocus = buildSpectralLocus();
@@ -733,6 +763,8 @@ function updateShellVisibility() {
   shells.srgb.xyy.group.visible = srgbVisible && currentMode === 'xyy';
   shells.adobe.lab.group.visible = adobeVisible && currentMode === 'lab';
   shells.adobe.xyy.group.visible = adobeVisible && currentMode === 'xyy';
+  shells.p3.lab.group.visible = p3Visible && currentMode === 'lab';
+  shells.p3.xyy.group.visible = p3Visible && currentMode === 'xyy';
 }
 
 // ============================================================
@@ -778,9 +810,11 @@ document.querySelectorAll('#coord-mode button').forEach(btn => {
 // Gamut overlays
 const toggleSrgb = document.getElementById('toggle-srgb');
 const toggleAdobe = document.getElementById('toggle-adobe');
+const toggleP3 = document.getElementById('toggle-p3');
 const toggleClip = document.getElementById('toggle-clip');
 const srgbControlsEl = document.getElementById('srgb-controls');
 const adobeControlsEl = document.getElementById('adobe-controls');
+const p3ControlsEl = document.getElementById('p3-controls');
 const clipInfoEl = document.getElementById('clip-info');
 
 toggleSrgb.addEventListener('change', () => {
@@ -792,6 +826,12 @@ toggleSrgb.addEventListener('change', () => {
 toggleAdobe.addEventListener('change', () => {
   adobeVisible = toggleAdobe.checked;
   adobeControlsEl.style.display = adobeVisible ? 'block' : 'none';
+  updateShellVisibility();
+  if (clipToGamut) updateClipAlphas();
+});
+toggleP3.addEventListener('change', () => {
+  p3Visible = toggleP3.checked;
+  p3ControlsEl.style.display = p3Visible ? 'block' : 'none';
   updateShellVisibility();
   if (clipToGamut) updateClipAlphas();
 });
@@ -819,6 +859,15 @@ adobeOpSlider.addEventListener('input', () => {
   adobeOpVal.textContent = v.toFixed(2);
   shells.adobe.lab.fillMat.opacity = v;
   shells.adobe.xyy.fillMat.opacity = v;
+});
+
+const p3OpSlider = document.getElementById('p3-opacity');
+const p3OpVal = document.getElementById('p3-opacity-val');
+p3OpSlider.addEventListener('input', () => {
+  const v = parseFloat(p3OpSlider.value);
+  p3OpVal.textContent = v.toFixed(2);
+  shells.p3.lab.fillMat.opacity = v;
+  shells.p3.xyy.fillMat.opacity = v;
 });
 
 // ============================================================
@@ -858,7 +907,7 @@ function animate() {
 // ============================================================
 // Boot
 // ============================================================
-loadTier('uf-obvious');
+loadTier('gf-obvious');
 animate();
 </script>
 </body>
