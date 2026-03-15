@@ -12,7 +12,8 @@ RUN apt-get update && \
 
 # Install Python deps (cached unless pyproject.toml changes)
 COPY pyproject.toml /build/
-RUN pip install --no-cache-dir /build/ && rm -rf /build
+RUN mkdir -p /build/census && \
+    pip install --no-cache-dir /build/ && rm -rf /build
 
 # Copy application
 COPY census/src/ src/

@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VIEWER_SRC = ROOT / "viewer" / "index.html"
+VIEWER_DIR = ROOT / "viewer"
 DATA_DIR = ROOT / "data"
 DIST_DIR = ROOT / "dist" / "playground"
 
@@ -75,11 +75,18 @@ def main():
 
     print(f"  Total data: {total_src:,} → {total_dst:,} bytes")
 
-    # Patch and write HTML
-    html = VIEWER_SRC.read_text()
+    # Patch and write gamut viewer
+    html = (VIEWER_DIR / "index.html").read_text()
     html = patch_html(html)
     (DIST_DIR / "index.html").write_text(html)
     print(f"  index.html: {len(html):,} bytes")
+
+    # Copy JND tests (no patching needed — they're fully self-contained)
+    for test_file in ["jnd-test.html", "odd-one-out.html"]:
+        src = VIEWER_DIR / test_file
+        html = src.read_text()
+        (DIST_DIR / test_file).write_text(html)
+        print(f"  {test_file}: {len(html):,} bytes")
 
     print(f"\nPlayground bundle ready at: {DIST_DIR.relative_to(ROOT)}/")
     print("Deploy this folder to muldoon.design/playground/ (or any path).")

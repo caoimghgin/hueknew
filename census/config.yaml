@@ -20,6 +20,9 @@ gamut:
 
 packing:
   thresholds:
+    - name: perceptible
+      delta_e: 0.5
+      description: "Perceptible under ideal side-by-side viewing conditions"
     - name: JND
       delta_e: 1.0
       description: "Theoretical limit of human color discrimination"

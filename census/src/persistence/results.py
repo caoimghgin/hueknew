@@ -198,6 +198,24 @@ class ResultsDatabase:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_all_seeds(self):
+        """Get all seeds grouped by tier name.
+
+        Returns:
+            Dict of tier_name -> numpy array of shape (N, 3) with columns [L, a, b].
+        """
+        import numpy as np
+
+        result = {}
+        tiers = self._conn.execute("SELECT id, name FROM thresholds").fetchall()
+        for tier in tiers:
+            rows = self._conn.execute(
+                "SELECT L, a, b FROM seeds WHERE threshold_id = ? ORDER BY id",
+                (tier["id"],),
+            ).fetchall()
+            result[tier["name"]] = np.array([(r["L"], r["a"], r["b"]) for r in rows]) if rows else np.empty((0, 3))
+        return result
+
     def close(self):
         """Close the database connection."""
         self._conn.close()

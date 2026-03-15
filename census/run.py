@@ -285,7 +285,7 @@ def run_engine(config, args):
         from src.core.cielab import lab_to_srgb_hex, is_in_srgb_gamut
         export_dir = Path(__file__).resolve().parent.parent / "data"
         export_dir.mkdir(parents=True, exist_ok=True)
-        tier_filenames = {"jnd": "jnd.csv", "acceptability": "acceptability.csv", "obvious": "obvious.csv"}
+        tier_filenames = {"perceptible": "perceptible.csv", "JND": "jnd.csv", "acceptability": "acceptability.csv", "obvious": "obvious.csv"}
         all_seeds = results_db.get_all_seeds()
         for tier_name, seeds in all_seeds.items():
             if tier_name not in tier_filenames:
@@ -349,7 +349,7 @@ def run_gapfill(config, args):
 
     # Start dashboard in background
     status_file = Path(config["reporting"]["status_file"])
-    if config.get("dashboard", {}).get("enabled", True):
+    if not args.no_dashboard and config.get("dashboard", {}).get("enabled", True):
         from src.dashboard.server import run_dashboard
         dash_config = config.get("dashboard", {})
         dashboard_thread = threading.Thread(
@@ -484,7 +484,7 @@ def run_gapfill(config, args):
     # Export CSVs with all seeds (original + gap-filled)
     export_dir = Path(__file__).resolve().parent.parent / "data"
     export_dir.mkdir(parents=True, exist_ok=True)
-    tier_filenames = {"jnd": "jnd.csv", "acceptability": "acceptability.csv", "obvious": "obvious.csv"}
+    tier_filenames = {"perceptible": "perceptible.csv", "JND": "jnd.csv", "acceptability": "acceptability.csv", "obvious": "obvious.csv"}
     all_tier_seeds = gapfill.get_all_seeds()
     from src.core.cielab import lab_to_srgb_hex, is_in_srgb_gamut
     for tier in gapfill.tiers:
@@ -521,6 +521,7 @@ def _import_csvs_to_db(db_path):
 
     data_dir = Path(__file__).resolve().parent.parent / "data"
     tier_map = {
+        "perceptible": ("perceptible", 0.5),
         "jnd": ("JND", 1.0),
         "acceptability": ("acceptability", 2.0),
         "obvious": ("obvious", 5.0),

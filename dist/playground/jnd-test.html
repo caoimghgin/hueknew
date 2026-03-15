@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What's My ΔE? — Chromatic Census</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #111; color: #ccc;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    overflow: hidden; height: 100vh; cursor: crosshair;
+    -webkit-user-select: none; user-select: none;
+  }
+
+  /* ── Intro screen ── */
+  #intro {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #111; padding: 32px;
+  }
+  #intro h1 { font-size: 28px; color: #fff; margin-bottom: 8px; }
+  #intro .subtitle { font-size: 14px; color: #888; margin-bottom: 32px; }
+  #intro .explain {
+    max-width: 480px; font-size: 14px; color: #aaa; line-height: 1.7;
+    margin-bottom: 32px; text-align: center;
+  }
+  #intro .explain strong { color: #fff; }
+  #start-btn, #restart-btn {
+    padding: 12px 32px; font-size: 16px; font-weight: 600;
+    background: #fff; color: #111; border: none; border-radius: 6px;
+    cursor: pointer; transition: opacity 0.15s;
+  }
+  #start-btn:hover, #restart-btn:hover { opacity: 0.85; }
+
+  /* ── Game area ── */
+  #game {
+    display: none; position: fixed; inset: 0;
+    cursor: crosshair;
+  }
+
+  /* ── HUD ── */
+  #hud {
+    display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+    padding: 10px 20px; font-size: 12px;
+    display: none; align-items: center; gap: 24px;
+  }
+  #hud .label { color: #666; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
+  #hud .value { color: #fff; font-variant-numeric: tabular-nums; font-weight: 600; }
+  #progress-bar {
+    flex: 1; height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;
+  }
+  #progress-fill { height: 100%; background: #fff; width: 0; transition: width 0.3s; }
+
+  /* ── Feedback overlays ── */
+  #boundary {
+    display: none; position: fixed; top: 0; bottom: 0; width: 2px;
+    background: #fff; z-index: 15; transform: translateX(-1px);
+    opacity: 0.8;
+  }
+  #click-marker {
+    display: none; position: fixed; top: 0; bottom: 0; width: 2px;
+    background: #f87171; z-index: 15; transform: translateX(-1px);
+    opacity: 0.8;
+  }
+  #feedback {
+    display: none; position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+    z-index: 20; font-size: 14px; font-weight: 600;
+    padding: 6px 16px; border-radius: 4px;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+  }
+  #caption {
+    display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 20; font-size: 13px; color: #666;
+    padding: 8px 16px; border-radius: 4px;
+    background: rgba(0,0,0,0.5); backdrop-filter: blur(8px);
+    max-width: 500px; text-align: center;
+  }
+
+  /* ── Result screen ── */
+  #result {
+    display: none; position: fixed; inset: 0; z-index: 100;
+    flex-direction: column; align-items: center; justify-content: center;
+    background: #111; padding: 32px;
+  }
+  #result h2 { font-size: 14px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  #result-jnd { font-size: 64px; font-weight: 700; color: #fff; margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+  #result-unit { font-size: 14px; color: #888; margin-bottom: 24px; }
+  #result-desc {
+    max-width: 500px; font-size: 14px; color: #aaa; line-height: 1.7;
+    text-align: center; margin-bottom: 32px;
+  }
+  .result-actions { display: flex; gap: 12px; }
+  #share-btn {
+    padding: 10px 24px; font-size: 14px; font-weight: 600;
+    background: transparent; color: #ccc; border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 6px; cursor: pointer;
+  }
+  #share-btn:hover { border-color: rgba(255,255,255,0.4); color: #fff; }
+  #share-btn.copied { border-color: #6ee7b7; color: #6ee7b7; }
+
+  /* ── Challenge banner ── */
+  #challenge-block {
+    display: none; margin-bottom: 24px; padding: 12px 20px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; text-align: center;
+  }
+  #challenge-block .score { font-size: 24px; font-weight: 700; color: #fff; }
+  #challenge-block .taunt { font-size: 13px; color: #888; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div id="intro">
+  <h1>What's My ΔE?</h1>
+  <div class="subtitle">A CIEDE2000 perception test from the Chromatic Census</div>
+  <div id="challenge-block">
+    <div>Their JND: <span class="score" id="challenge-score"></span> ΔE<sub>00</sub></div>
+    <div class="taunt" id="challenge-taunt"></div>
+  </div>
+  <div class="explain">
+    You'll see <strong>two colors</strong> side by side.<br>
+    <strong>Click on the line</strong> where they meet.<br><br>
+    The colors get closer each round until we find your<br>
+    <strong>Just Noticeable Difference</strong> — the smallest ΔE<sub>00</sub> you can perceive.
+  </div>
+  <button id="start-btn">Start</button>
+  <div style="margin-top: 24px; font-size: 12px; color: #555;">Inspired by <a href="https://www.keithcirkel.co.uk/whats-my-jnd-hard/" style="color: #888;" target="_blank">Keith Cirkel's What's My JND?</a></div>
+</div>
+
+<div id="game"></div>
+
+<div id="hud">
+  <div><span class="label">Round</span> <span class="value" id="round-num">1</span></div>
+  <div><span class="label">ΔE<sub>00</sub></span> <span class="value" id="current-de">—</span></div>
+  <div id="progress-bar"><div id="progress-fill"></div></div>
+</div>
+
+<div id="boundary"></div>
+<div id="click-marker"></div>
+<div id="feedback"></div>
+<div id="caption"></div>
+
+<div id="result">
+  <h2>Your Just Noticeable Difference</h2>
+  <div id="result-jnd">—</div>
+  <div id="result-unit">ΔE<sub>00</sub> (CIEDE2000)</div>
+  <div id="result-desc"></div>
+  <div class="result-actions">
+    <button id="share-btn">Share result</button>
+    <button id="restart-btn">Try again</button>
+  </div>
+</div>
+
+<script type="module">
+
+// ============================================================
+// CIEDE2000 — ported from census/src/core/delta_e.py
+// ============================================================
+
+const {sqrt, pow, abs, sin, cos, exp, atan2, PI} = Math;
+const RAD = PI / 180;
+const DEG = 180 / PI;
+const POW25_7 = pow(25, 7);
+
+function ciede2000(L1, a1, b1, L2, a2, b2) {
+  const C1_ab = sqrt(a1*a1 + b1*b1);
+  const C2_ab = sqrt(a2*a2 + b2*b2);
+
+  const C_ab_mean = (C1_ab + C2_ab) / 2;
+  const C_ab_mean_pow7 = pow(C_ab_mean, 7);
+  const G = 0.5 * (1 - sqrt(C_ab_mean_pow7 / (C_ab_mean_pow7 + POW25_7)));
+
+  const a1p = a1 * (1 + G);
+  const a2p = a2 * (1 + G);
+
+  const C1p = sqrt(a1p*a1p + b1*b1);
+  const C2p = sqrt(a2p*a2p + b2*b2);
+
+  let h1p = (atan2(b1, a1p) * DEG) % 360;
+  if (h1p < 0) h1p += 360;
+  let h2p = (atan2(b2, a2p) * DEG) % 360;
+  if (h2p < 0) h2p += 360;
+
+  const dLp = L2 - L1;
+  const dCp = C2p - C1p;
+
+  const Cprod = C1p * C2p;
+  let hdiff = h2p - h1p;
+  let dhp;
+  if (Cprod === 0) {
+    dhp = 0;
+  } else if (abs(hdiff) <= 180) {
+    dhp = hdiff;
+  } else if (hdiff > 180) {
+    dhp = hdiff - 360;
+  } else {
+    dhp = hdiff + 360;
+  }
+
+  const dHp = 2 * sqrt(Cprod) * sin(dhp / 2 * RAD);
+
+  const Lpm = (L1 + L2) / 2;
+  const Cpm = (C1p + C2p) / 2;
+
+  const hsum = h1p + h2p;
+  let hpm;
+  if (Cprod === 0) {
+    hpm = hsum;
+  } else if (abs(hdiff) <= 180) {
+    hpm = hsum / 2;
+  } else if (hsum < 360) {
+    hpm = (hsum + 360) / 2;
+  } else {
+    hpm = (hsum - 360) / 2;
+  }
+
+  const T = 1
+    - 0.17 * cos((hpm - 30) * RAD)
+    + 0.24 * cos(2 * hpm * RAD)
+    + 0.32 * cos((3 * hpm + 6) * RAD)
+    - 0.20 * cos((4 * hpm - 63) * RAD);
+
+  const Lpm50sq = (Lpm - 50) * (Lpm - 50);
+  const S_L = 1 + 0.015 * Lpm50sq / sqrt(20 + Lpm50sq);
+  const S_C = 1 + 0.045 * Cpm;
+  const S_H = 1 + 0.015 * Cpm * T;
+
+  const Cpm7 = pow(Cpm, 7);
+  const R_C = 2 * sqrt(Cpm7 / (Cpm7 + POW25_7));
+  const dtheta = 30 * exp(-pow((hpm - 275) / 25, 2));
+  const R_T = -sin(2 * dtheta * RAD) * R_C;
+
+  const tL = dLp / S_L;
+  const tC = dCp / S_C;
+  const tH = dHp / S_H;
+
+  return sqrt(tL*tL + tC*tC + tH*tH + R_T * tC * tH);
+}
+
+// ============================================================
+// Color conversion (Lab ↔ XYZ ↔ sRGB)
+// ============================================================
+
+const D65_Xn = 0.95047, D65_Yn = 1.0, D65_Zn = 1.08883;
+
+function labToXyz(L, a, b) {
+  const d = 6/29, d3 = 108/841;
+  const fy = (L + 16) / 116;
+  const fx = fy + a / 500;
+  const fz = fy - b / 200;
+  const finv = t => t > d ? t*t*t : d3 * (t - 16/116);
+  return [D65_Xn * finv(fx), D65_Yn * finv(fy), D65_Zn * finv(fz)];
+}
+
+function xyzToLinearSrgb(X, Y, Z) {
+  return [
+     3.2404542*X - 1.5371385*Y - 0.4985314*Z,
+    -0.9692660*X + 1.8760108*Y + 0.0415560*Z,
+     0.0556434*X - 0.2040259*Y + 1.0572252*Z,
+  ];
+}
+
+function srgbGamma(c) {
+  return c <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1/2.4) - 0.055;
+}
+
+function labToSrgbHex(L, a, b) {
+  const [X, Y, Z] = labToXyz(L, a, b);
+  const [lr, lg, lb] = xyzToLinearSrgb(X, Y, Z);
+  const r = Math.round(Math.min(255, Math.max(0, srgbGamma(lr) * 255)));
+  const g = Math.round(Math.min(255, Math.max(0, srgbGamma(lg) * 255)));
+  const bv = Math.round(Math.min(255, Math.max(0, srgbGamma(lb) * 255)));
+  return '#' + ((1 << 24) | (r << 16) | (g << 8) | bv).toString(16).slice(1);
+}
+
+function labInSrgb(L, a, b) {
+  const [X, Y, Z] = labToXyz(L, a, b);
+  const [lr, lg, lb] = xyzToLinearSrgb(X, Y, Z);
+  const tol = -0.001;
+  return lr >= tol && lr <= 1.001 && lg >= tol && lg <= 1.001 && lb >= tol && lb <= 1.001;
+}
+
+// ============================================================
+// Color pair generation at a target CIEDE2000 distance
+// ============================================================
+
+function randomLabInGamut() {
+  for (let i = 0; i < 500; i++) {
+    const L = 20 + Math.random() * 65;  // avoid extremes
+    const a = (Math.random() - 0.5) * 160;
+    const b = (Math.random() - 0.5) * 160;
+    if (labInSrgb(L, a, b)) return [L, a, b];
+  }
+  return [50, 0, 0];
+}
+
+function generatePairAtDeltaE(targetDE) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const [L1, a1, b1] = randomLabInGamut();
+
+    // Random direction on unit sphere in Lab
+    const theta = Math.random() * 2 * PI;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const dL = sin(phi) * cos(theta);
+    const da = sin(phi) * sin(theta);
+    const db = cos(phi);
+
+    // Binary search for the right step size
+    let lo = 0, hi = targetDE * 3;
+    let bestStep = null, bestDE = Infinity;
+
+    for (let iter = 0; iter < 40; iter++) {
+      const mid = (lo + hi) / 2;
+      const L2 = L1 + dL * mid;
+      const a2 = a1 + da * mid;
+      const b2 = b1 + db * mid;
+
+      if (!labInSrgb(L2, a2, b2)) {
+        hi = mid;
+        continue;
+      }
+
+      const de = ciede2000(L1, a1, b1, L2, a2, b2);
+      const err = abs(de - targetDE) / targetDE;
+
+      if (err < abs(bestDE - targetDE) / targetDE) {
+        bestDE = de;
+        bestStep = mid;
+      }
+
+      if (de < targetDE) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+
+    if (bestStep !== null && abs(bestDE - targetDE) / targetDE < 0.05) {
+      const L2 = L1 + dL * bestStep;
+      const a2 = a1 + da * bestStep;
+      const b2 = b1 + db * bestStep;
+      return {
+        lab1: [L1, a1, b1], lab2: [L2, a2, b2],
+        hex1: labToSrgbHex(L1, a1, b1), hex2: labToSrgbHex(L2, a2, b2),
+        actualDE: bestDE,
+      };
+    }
+  }
+
+  // Fallback: achromatic pair
+  const L1 = 50;
+  const L2 = 50 + targetDE * 0.8;
+  return {
+    lab1: [L1, 0, 0], lab2: [L2, 0, 0],
+    hex1: labToSrgbHex(L1, 0, 0), hex2: labToSrgbHex(L2, 0, 0),
+    actualDE: ciede2000(L1, 0, 0, L2, 0, 0),
+  };
+}
+
+// ============================================================
+// Staircase levels — logarithmic from 10.0 down to 0.1 ΔE00
+// ============================================================
+
+const LEVELS = (() => {
+  const logHi = Math.log10(5);
+  const logLo = Math.log10(0.1);
+  const n = 20;
+  const arr = [];
+  for (let i = 0; i <= n; i++) {
+    const logVal = logHi + (logLo - logHi) * (i / n);
+    arr.push(parseFloat(pow(10, logVal).toPrecision(3)));
+  }
+  return arr;
+})();
+
+// ============================================================
+// Game state
+// ============================================================
+
+const MAX_ROUNDS = 40;
+const CORRECT_TO_ADVANCE = 2;  // 2-up/1-down staircase
+const MIN_REVERSALS = 8;
+const MAX_STUCK = 3;
+
+let levelIndex = 0;
+let round = 0;
+let totalCorrect = 0;
+let totalAnswered = 0;
+let active = false;
+let currentTrial = null;
+let trials = [];
+let reversals = [];
+let lastDirection = null;
+let runCorrect = 0;
+let runLength = 0;
+let stuckAtZero = 0;
+let streakCorrect = 0;
+let streakWrong = 0;
+let finalJnd = 0;
+
+// ============================================================
+// DOM refs
+// ============================================================
+
+const introEl = document.getElementById('intro');
+const gameEl = document.getElementById('game');
+const hudEl = document.getElementById('hud');
+const resultEl = document.getElementById('result');
+const feedbackEl = document.getElementById('feedback');
+const boundaryEl = document.getElementById('boundary');
+const clickMarkerEl = document.getElementById('click-marker');
+const captionEl = document.getElementById('caption');
+const roundNumEl = document.getElementById('round-num');
+const currentDeEl = document.getElementById('current-de');
+const progressFill = document.getElementById('progress-fill');
+const resultJndEl = document.getElementById('result-jnd');
+const resultDescEl = document.getElementById('result-desc');
+const shareBtn = document.getElementById('share-btn');
+
+// ============================================================
+// Feedback words
+// ============================================================
+
+const CORRECT_WORDS = [
+  'Nailed it', 'Yep', 'Got it', 'Nice', 'Right', 'Correct', 'Sharp',
+  'Spot on', 'Bang on', 'Dead on', 'Clean', 'Solid', 'True', 'Precise',
+];
+const WRONG_WORDS = [
+  'Nope', 'Not quite', 'Miss', 'Wrong', 'Off', 'Nah', 'Wide',
+  'Way off', 'Ouch', 'Cold', 'Swing and a miss', 'Oof',
+];
+
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// ============================================================
+// Commentary
+// ============================================================
+
+const COMMENTARY = {
+  early: [
+    'Warm-up. These two aren\'t even trying to hide.',
+    'If you can\'t see this one, check your monitor.',
+    'Starting easy. Savour it.',
+    'The colors are practically arguing with each other.',
+    'These two colors aren\'t even on speaking terms.',
+    'Still in tutorial mode.',
+  ],
+  mid: [
+    'Getting interesting now.',
+    'Training wheels are off.',
+    'The gap is closing.',
+    'Squint if you need to. No judgment.',
+    'Starting to earn it.',
+    'Your cones are warming up. Or panicking.',
+    'This is where confidence meets reality.',
+    'Ambient lighting: suddenly relevant.',
+    'That smudge on your screen? Not helping.',
+  ],
+  hard: [
+    'Good luck with this one.',
+    'The difference is there. Allegedly.',
+    'We\'re past what the textbooks say you should see.',
+    'Sub-perceptual territory. Here be dragons.',
+    'One of these is a color. The other is also a color. Good luck.',
+    'You\'re not guessing. You\'re making an informed prayer.',
+    'Even the CIE would be guessing at this point.',
+    'Your retinas filed a formal complaint.',
+  ],
+  streak: [
+    'You\'re on a roll.',
+    'Someone\'s been eating their carrots.',
+    'Unstoppable. For now.',
+    'The CIE should be sending you a job offer.',
+  ],
+  coldStreak: [
+    'Rough patch. It builds character.',
+    'Your cones have left the building.',
+    'Take a breath. The pixels will wait.',
+    'Everyone has an off round. Or three.',
+  ],
+};
+
+function getCommentary() {
+  if (streakCorrect >= 3) return pick(COMMENTARY.streak);
+  if (streakWrong >= 3) return pick(COMMENTARY.coldStreak);
+  const de = LEVELS[levelIndex];
+  if (de >= 3) return pick(COMMENTARY.early);
+  if (de >= 0.8) return pick(COMMENTARY.mid);
+  return pick(COMMENTARY.hard);
+}
+
+// ============================================================
+// Result encoding/decoding for share URLs
+// ============================================================
+
+function encodeResult(jnd, correct, total, trialResults) {
+  const jndInt = Math.round(jnd * 1000);
+  const bytes = new Uint8Array(4 + Math.ceil(trialResults.length / 8));
+  bytes[0] = (jndInt >> 8) & 0xff;
+  bytes[1] = jndInt & 0xff;
+  bytes[2] = correct;
+  bytes[3] = total;
+  for (let i = 0; i < trialResults.length; i++) {
+    if (trialResults[i]) bytes[4 + (i >> 3)] |= 1 << (7 - (i & 7));
+  }
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function decodeResult(str) {
+  try {
+    const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(b64);
+    if (raw.length < 4) return null;
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    const jnd = ((bytes[0] << 8) | bytes[1]) / 1000;
+    const correct = bytes[2];
+    const total = bytes[3];
+    if (jnd <= 0 || jnd > 20 || correct > total || total > 60) return null;
+    return { jnd, correct, total };
+  } catch { return null; }
+}
+
+// ============================================================
+// Data collection
+// ============================================================
+
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbxizKjRqMJA_2aauHx19CUyHSpWaLWHHBg9kL3EVxL_ay14eLmK86_IlM5rjcUs04b9Xw/exec';
+
+function submitResult(jnd) {
+  const trialSummary = trials.map(t =>
+    `${formatDE(t.de)}:${t.correct ? 1 : 0}`
+  ).join('|');
+
+  const payload = {
+    test_type: 'side-by-side',
+    jnd_score: parseFloat(formatDE(jnd)),
+    rounds: round,
+    correct: totalCorrect,
+    total: totalAnswered,
+    user_agent: navigator.userAgent,
+    screen_width: screen.width,
+    screen_height: screen.height,
+    trial_data: trialSummary,
+  };
+
+  fetch(SHEET_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+}
+
+// ============================================================
+// UI helpers
+// ============================================================
+
+function formatDE(de) {
+  return de >= 1 ? de.toFixed(2) : de >= 0.1 ? de.toFixed(3) : de.toFixed(4);
+}
+
+function showFeedback(correct, splitVW, clickVW) {
+  feedbackEl.textContent = pick(correct ? CORRECT_WORDS : WRONG_WORDS);
+  feedbackEl.style.color = correct ? '#6ee7b7' : '#f87171';
+  feedbackEl.style.display = 'block';
+
+  boundaryEl.style.left = (splitVW / 100 * window.innerWidth) + 'px';
+  boundaryEl.style.display = 'block';
+
+  clickMarkerEl.style.left = (clickVW / 100 * window.innerWidth) + 'px';
+  clickMarkerEl.style.display = 'block';
+}
+
+function hideFeedback() {
+  feedbackEl.style.display = 'none';
+  boundaryEl.style.display = 'none';
+  clickMarkerEl.style.display = 'none';
+}
+
+function showCaption(text) {
+  captionEl.textContent = text;
+  captionEl.style.display = 'block';
+}
+
+function hideCaption() {
+  captionEl.style.display = 'none';
+}
+
+// ============================================================
+// Round setup
+// ============================================================
+
+let lastSplitVW = -1;
+
+function nextRound() {
+  const de = LEVELS[levelIndex];
+  const pair = generatePairAtDeltaE(de);
+
+  // Random split position (avoid repeats near same spot)
+  let splitVW;
+  for (let i = 0; i < 20; i++) {
+    splitVW = 15 + Math.random() * 70;
+    if (lastSplitVW < 0 || abs(splitVW - lastSplitVW) >= 12) break;
+  }
+  lastSplitVW = splitVW;
+
+  // Random left/right assignment
+  const flip = Math.random() < 0.5;
+  const leftHex = flip ? pair.hex2 : pair.hex1;
+  const rightHex = flip ? pair.hex1 : pair.hex2;
+
+  const edgePx = 0.15;  // vw softness on each side
+  gameEl.style.background = `linear-gradient(to right, ${leftHex} ${splitVW - edgePx}vw, ${rightHex} ${splitVW + edgePx}vw)`;
+
+  currentTrial = { de, actualDE: pair.actualDE, splitVW, pair };
+  round++;
+  roundNumEl.textContent = round;
+  currentDeEl.textContent = formatDE(de);
+  progressFill.style.width = Math.min(100, Math.round(round / MAX_ROUNDS * 100)) + '%';
+}
+
+// ============================================================
+// Click handler
+// ============================================================
+
+function handleClick(e) {
+  if (!active || !currentTrial) return;
+  active = false;
+  hideCaption();
+
+  const clickVW = e.clientX / window.innerWidth * 100;
+  const errorVW = abs(clickVW - currentTrial.splitVW);
+  const threshold = 5;  // vw tolerance
+  const correct = errorVW <= threshold;
+
+  totalAnswered++;
+  if (correct) { totalCorrect++; streakCorrect++; streakWrong = 0; }
+  else { streakWrong++; streakCorrect = 0; }
+
+  trials.push({ ...currentTrial, clickVW, errorVW, correct, levelIndex });
+
+  // Staircase logic
+  runLength++;
+  if (correct) runCorrect++;
+
+  if (runLength >= CORRECT_TO_ADVANCE) {
+    const allCorrect = runCorrect === CORRECT_TO_ADVANCE;
+    const dir = allCorrect ? 'down' : 'up';
+
+    // Record reversal
+    if (lastDirection && lastDirection !== dir) {
+      reversals.push(LEVELS[levelIndex]);
+    }
+    lastDirection = dir;
+
+    if (allCorrect && levelIndex < LEVELS.length - 1) {
+      levelIndex++;
+    } else if (!allCorrect && levelIndex > 0) {
+      levelIndex--;
+    }
+
+    stuckAtZero = levelIndex === 0 ? stuckAtZero + 1 : 0;
+    runLength = 0;
+    runCorrect = 0;
+  }
+
+  showFeedback(correct, currentTrial.splitVW, clickVW);
+
+  setTimeout(() => {
+    const done = reversals.length >= MIN_REVERSALS || round >= MAX_ROUNDS || stuckAtZero >= MAX_STUCK;
+    if (done) {
+      showResult();
+    } else {
+      hideFeedback();
+      nextRound();
+      showCaption(getCommentary());
+      active = true;
+    }
+  }, 600);
+}
+
+// ============================================================
+// Result
+// ============================================================
+
+function showResult() {
+  active = false;
+  gameEl.style.display = 'none';
+  hudEl.style.display = 'none';
+  hideFeedback();
+  hideCaption();
+
+  let jnd;
+  if (reversals.length >= 4) {
+    const tail = reversals.slice(-6);
+    jnd = tail.reduce((s, v) => s + v, 0) / tail.length;
+  } else {
+    jnd = LEVELS[levelIndex];
+  }
+
+  finalJnd = jnd;
+  submitResult(jnd);
+  resultJndEl.textContent = formatDE(jnd);
+
+  // Description based on result
+  let desc;
+  if (jnd <= 0.3) {
+    desc = 'Either you have superhuman color vision or something unusual is going on. '
+      + 'This is well below the theoretical JND of 1.0 ΔE₀₀. Impressive — or suspicious.';
+  } else if (jnd <= 0.7) {
+    desc = 'Remarkably sharp. You\'re perceiving differences that most color scientists '
+      + 'would consider sub-threshold. Your monitor calibration must be excellent.';
+  } else if (jnd <= 1.2) {
+    desc = 'Right around the canonical JND of 1.0 ΔE₀₀. This is where the CIE says human '
+      + 'perception hits its limit. You\'re a textbook observer — and that\'s a compliment.';
+  } else if (jnd <= 2.0) {
+    desc = 'Slightly above the JND threshold. You can tell colors apart when it matters, '
+      + 'and the differences you missed were genuinely subtle. Solidly normal.';
+  } else if (jnd <= 3.5) {
+    desc = 'Above the acceptability threshold. Display calibration, ambient lighting, '
+      + 'and screen fatigue all affect this. Try again in a dark room with brightness up.';
+  } else {
+    desc = 'The big differences were easy, but the subtle ones got away. '
+      + 'Screen quality and lighting matter more than people think. '
+      + 'Clean your screen, dim the lights, and give it another go.';
+  }
+
+  resultDescEl.textContent = desc;
+
+  // Update URL with result
+  const code = encodeResult(jnd, totalCorrect, totalAnswered, trials.map(t => t.correct));
+  const url = `${location.pathname}?r=${code}`;
+  history.pushState(null, '', url);
+
+  resultEl.style.display = 'flex';
+}
+
+// ============================================================
+// Share
+// ============================================================
+
+function getShareText() {
+  return `What's My ΔE? ${formatDE(finalJnd)} ΔE₀₀ (CIEDE2000)\nCan you beat it? ${location.href}`;
+}
+
+async function share() {
+  const text = getShareText();
+  if (navigator.share) {
+    try { await navigator.share({ text }); return; } catch {}
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    shareBtn.textContent = 'Copied!';
+    shareBtn.classList.add('copied');
+    setTimeout(() => {
+      shareBtn.textContent = 'Share result';
+      shareBtn.classList.remove('copied');
+    }, 2000);
+    return;
+  } catch {}
+  // Fallback
+  prompt('Copy your result:', text);
+}
+
+// ============================================================
+// Start / Restart
+// ============================================================
+
+function startGame() {
+  // Reset state
+  levelIndex = 0;
+  round = 0;
+  totalCorrect = 0;
+  totalAnswered = 0;
+  trials = [];
+  reversals = [];
+  lastDirection = null;
+  runCorrect = 0;
+  runLength = 0;
+  stuckAtZero = 0;
+  streakCorrect = 0;
+  streakWrong = 0;
+  lastSplitVW = -1;
+
+  introEl.style.display = 'none';
+  resultEl.style.display = 'none';
+  gameEl.style.display = 'block';
+  hudEl.style.display = 'flex';
+
+  if (location.search) history.replaceState(null, '', location.pathname);
+
+  nextRound();
+  showCaption(getCommentary());
+  active = true;
+}
+
+// ============================================================
+// Challenge mode (shared result URL)
+// ============================================================
+
+function checkChallenge() {
+  const code = new URLSearchParams(location.search).get('r');
+  if (!code) return;
+  const result = decodeResult(code);
+  if (!result) return;
+  document.getElementById('challenge-score').textContent = formatDE(result.jnd);
+  const taunts = [
+    'Time to shame them.', 'Prove them wrong.', 'Beat it or live in their shadow.',
+    'Surely you can do better.', 'They had the audacity to share it. Destroy their confidence.',
+    'No mercy.', 'Show them what impressive looks like.',
+  ];
+  document.getElementById('challenge-taunt').textContent = pick(taunts);
+  document.getElementById('challenge-block').style.display = '';
+  document.getElementById('start-btn').textContent = 'Challenge accepted';
+}
+
+// ============================================================
+// Wire up
+// ============================================================
+
+checkChallenge();
+document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('restart-btn').addEventListener('click', startGame);
+shareBtn.addEventListener('click', share);
+gameEl.addEventListener('click', handleClick);
+
+</script>
+</body>
+</html>
