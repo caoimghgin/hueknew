@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interpolation Paths — Chromatic Census</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #777777; color: #ccc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  .panel {
+    position: fixed; z-index: 10;
+    background: rgba(0,0,0,0.7); border-radius: 8px;
+    backdrop-filter: blur(8px); font-size: 12px;
+  }
+  #hud {
+    top: 16px; left: 16px; padding: 16px 20px; max-width: 320px;
+    pointer-events: none;
+  }
+  #hud h1 { font-size: 14px; color: #fff; margin-bottom: 4px; font-weight: 600; }
+  #hud p { font-size: 12px; color: #999; line-height: 1.5; }
+
+  #path-controls {
+    top: 16px; right: 16px; padding: 14px 18px; width: 260px;
+  }
+  #path-controls .section-label {
+    color: #999; font-size: 10px; margin-bottom: 8px;
+    text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+  }
+  #color-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+  }
+  #color-picker {
+    width: 36px; height: 28px; border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 4px; cursor: pointer; background: none; padding: 0;
+  }
+  #hex-input {
+    width: 90px; padding: 4px 8px; border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08);
+    color: #fff; font-family: monospace; font-size: 13px;
+  }
+  #hex-input:focus { outline: none; border-color: rgba(255,255,255,0.4); }
+  #suggested {
+    display: flex; gap: 6px; margin-bottom: 12px;
+  }
+  #suggested .swatch {
+    width: 28px; height: 20px; border-radius: 3px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.15);
+    transition: border-color 0.15s;
+  }
+  #suggested .swatch:hover { border-color: rgba(255,255,255,0.5); }
+  .divider {
+    border-top: 1px solid rgba(255,255,255,0.1); margin: 10px 0;
+  }
+  #space-select {
+    width: 100%; padding: 5px 8px; border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08);
+    color: #fff; font-size: 12px; margin-bottom: 10px; cursor: pointer;
+  }
+  #space-select:focus { outline: none; border-color: rgba(255,255,255,0.4); }
+  #space-select option { background: #333; color: #fff; }
+  .mode-buttons { display: flex; gap: 4px; margin-bottom: 4px; }
+  .mode-buttons button {
+    flex: 1; padding: 5px 8px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+    color: #ccc; border-radius: 4px; cursor: pointer; font-size: 12px;
+  }
+  .mode-buttons button:hover { background: rgba(255,255,255,0.15); }
+  .mode-buttons button.active { background: rgba(255,255,255,0.2); color: #fff; border-color: rgba(255,255,255,0.4); }
+
+  #controls {
+    bottom: 16px; left: 16px; padding: 12px 16px;
+  }
+  #controls label { display: block; margin-bottom: 8px; color: #999; }
+  #controls input[type=range] { width: 180px; vertical-align: middle; }
+  #controls .val { color: #fff; display: inline-block; width: 32px; text-align: right; }
+
+  #camera-info {
+    bottom: 16px; right: 16px; padding: 10px 14px;
+    font-size: 11px; color: #666; font-variant-numeric: tabular-nums;
+  }
+
+  #lab-readout {
+    margin-top: 8px; font-size: 11px; color: #666;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .download-btn {
+    display: block; width: 100%; margin-top: 10px; padding: 6px 8px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+    color: #ccc; border-radius: 4px; cursor: pointer; font-size: 11px;
+    text-align: center; transition: background 0.15s;
+  }
+  .download-btn:hover { background: rgba(255,255,255,0.18); color: #fff; }
+
+  .info-toggle {
+    display: inline-block; width: 16px; height: 16px; line-height: 16px;
+    text-align: center; border-radius: 50%; font-size: 10px; font-weight: 700;
+    background: rgba(255,255,255,0.12); color: #999; cursor: pointer;
+    margin-left: 6px; vertical-align: middle; border: none;
+  }
+  .info-toggle:hover { background: rgba(255,255,255,0.25); color: #fff; }
+
+  #info-panel {
+    display: none; margin-top: 10px; padding: 10px 12px;
+    background: rgba(255,255,255,0.06); border-radius: 6px;
+    font-size: 11px; line-height: 1.6; color: #aaa;
+  }
+  #info-panel.visible { display: block; }
+  #info-panel strong { color: #ddd; }
+  #info-panel p { margin-bottom: 6px; }
+  #info-panel p:last-child { margin-bottom: 0; }
+
+  #scale-strip {
+    position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%);
+    z-index: 10; display: flex; flex-direction: column; align-items: center;
+    background: #fff; border-radius: 6px; padding: 8px 10px 6px;
+  }
+  #scale-strip .strip-label {
+    color: #333; font-size: 10px; margin-bottom: 4px;
+    text-transform: lowercase; letter-spacing: 0.5px; font-weight: 600;
+  }
+  #scale-strip .weight-row {
+    display: flex; gap: 0;
+  }
+  #scale-strip .weight-cell {
+    display: flex; flex-direction: column; align-items: center;
+  }
+  #scale-strip .weight-label {
+    font-size: 8px; color: #666; line-height: 1;
+    font-variant-numeric: tabular-nums; font-family: monospace;
+    width: 32px; text-align: center;
+  }
+  #scale-strip .weight-label.top { margin-bottom: 2px; }
+  #scale-strip .weight-swatch {
+    width: 32px; height: 26px;
+  }
+</style>
+</head>
+<body>
+
+<div id="hud" class="panel">
+  <h1>Interpolation Paths</h1>
+  <p>Color interpolation through CIELAB space</p>
+  <p style="margin-top: 6px; color: #666;">Drag to orbit · Scroll to zoom · Right-drag to pan</p>
+</div>
+
+<div id="path-controls" class="panel">
+  <div class="section-label">Color</div>
+  <div id="color-row">
+    <input type="color" id="color-picker" value="#0044ff">
+    <input type="text" id="hex-input" value="#0044ff" spellcheck="false">
+  </div>
+  <div id="suggested">
+    <div class="swatch" style="background:#0044ff;" data-hex="#0044ff" title="#0044ff"></div>
+    <div class="swatch" style="background:#0088ff;" data-hex="#0088ff" title="#0088ff"></div>
+    <div class="swatch" style="background:#00bbff;" data-hex="#00bbff" title="#00bbff"></div>
+    <div class="swatch" style="background:#ff4400;" data-hex="#ff4400" title="#ff4400"></div>
+    <div class="swatch" style="background:#00cc66;" data-hex="#00cc66" title="#00cc66"></div>
+  </div>
+  <div class="divider"></div>
+  <div class="section-label">Tween Space</div>
+  <select id="space-select">
+    <option value="srgb">sRGB</option>
+    <option value="hsl">HSL</option>
+    <option value="lab-d65" selected>CIE L*a*b* (D65)</option>
+    <option value="lab">CIE L*a*b* (D50)</option>
+    <option value="lch">CIE LCH</option>
+    <option value="oklab">OKLab</option>
+    <option value="oklch">OKLch</option>
+    <option value="jzazbz">Jzazbz</option>
+  </select>
+  <div class="divider"></div>
+  <div class="section-label">Display</div>
+  <div class="mode-buttons">
+    <button data-mode="smooth">Smooth</button>
+    <button class="active" data-mode="steps">23-Step</button>
+  </div>
+  <div id="lab-readout"></div>
+  <button class="download-btn" id="download-btn">Download Scale (CSV)</button>
+  <div style="margin-top: 10px;">
+    <span class="section-label" style="margin-bottom: 0;">About</span>
+    <button class="info-toggle" id="info-toggle" title="What do these settings mean?">?</button>
+  </div>
+  <div id="info-panel">
+    <p><strong>Tween Space</strong> controls which color model is used to interpolate between white, your picked color, and black. Different models trace different paths through perceptual color space — some preserve hue better, others keep lightness more uniform.</p>
+    <p><strong>D65 vs D50:</strong> These refer to the reference white point (illuminant). D65 ≈ daylight (6504 K), used by sRGB, web, and most color science. D50 ≈ horizon light (5003 K), used by ICC profiles and Adobe Photoshop's Lab mode. The same physical color has slightly different L*a*b* numbers under each illuminant — mostly in the b* (blue–yellow) axis.</p>
+    <p><strong>23-Step</strong> builds a tint/shade scale: the picked color is placed at the nearest lightness step, then interpolated toward white (tints) and black (shades) in the selected space.</p>
+    <p><strong>Smooth</strong> draws two continuous curves (to white and to black, 200 samples each) so you can see the exact path through the 3D space.</p>
+  </div>
+</div>
+
+<div id="controls" class="panel">
+  <label>Point size <input type="range" id="size-slider" min="0.5" max="8" step="0.25" value="1.5"> <span class="val" id="size-val">1.5</span></label>
+  <label>Opacity <input type="range" id="alpha-slider" min="0.05" max="1.0" step="0.05" value="0.35"> <span class="val" id="alpha-val">0.35</span></label>
+</div>
+
+<div id="camera-info" class="panel">Camera: <span id="cam-pos">—</span></div>
+
+<div id="scale-strip"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+
+// ============================================================
+// Load Color.js dynamically (no importmap entry needed)
+// ============================================================
+const ColorJS = await import('https://cdn.jsdelivr.net/npm/colorjs.io@0.5.2/dist/color.js');
+const Color = ColorJS.default;
+
+// ============================================================
+// Constants
+// ============================================================
+const D65_Xn = 0.95047, D65_Yn = 1.00000, D65_Zn = 1.08883;
+
+const TWEEN_SPACES = [
+  { key: 'srgb',    label: 'sRGB' },
+  { key: 'hsl',     label: 'HSL' },
+  { key: 'lab-d65', label: 'CIE L*a*b* (D65)' },
+  { key: 'lab',     label: 'CIE L*a*b* (D50)' },
+  { key: 'lch',     label: 'CIE LCH' },
+  { key: 'oklab',   label: 'OKLab' },
+  { key: 'oklch',   label: 'OKLch' },
+  { key: 'jzazbz',  label: 'Jzazbz' },
+];
+
+const WEIGHT_NAMES = [
+  '000','025','050','075','100','150','200','250','300','350',
+  '400','450','500','550','600','650','700','750','800','850',
+  '900','950','999'
+];
+const STEP_COUNT = WEIGHT_NAMES.length;    // 23
+const SMOOTH_COUNT = 200;
+
+// ============================================================
+// Color math (from Gamut Viewer)
+// ============================================================
+function labToXyz(L, a, b) {
+  const delta = 6 / 29;
+  const delta_sq3 = 108 / 841;
+  const fy = (L + 16) / 116;
+  const fx = fy + a / 500;
+  const fz = fy - b / 200;
+  function finv(t) {
+    return t > delta ? t * t * t : delta_sq3 * (t - 16 / 116);
+  }
+  return [D65_Xn * finv(fx), D65_Yn * finv(fy), D65_Zn * finv(fz)];
+}
+
+function labF(t) {
+  return t > 0.008856452 ? Math.cbrt(t) : t / 0.12841855 + 4 / 29;
+}
+function xyzToLab(X, Y, Z) {
+  const fy = labF(Y / D65_Yn);
+  return [116 * fy - 16, 500 * (labF(X / D65_Xn) - fy), 200 * (fy - labF(Z / D65_Zn))];
+}
+
+function srgbLinearize(c) {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+// ============================================================
+// Scene setup
+// ============================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x777777);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 1000);
+// elev 60°, azim 64°, dist 294
+const camDist = 294;
+const camElev = 60 * Math.PI / 180;
+const camAzim = 64 * Math.PI / 180;
+camera.position.set(
+  camDist * Math.cos(camElev) * Math.sin(camAzim),
+  camDist * Math.sin(camElev),
+  camDist * Math.cos(camElev) * Math.cos(camAzim)
+);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(innerWidth, innerHeight);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0';
+labelRenderer.domElement.style.pointerEvents = 'none';
+document.body.appendChild(labelRenderer.domElement);
+
+const orbitControls = new OrbitControls(camera, renderer.domElement);
+orbitControls.enableDamping = true;
+orbitControls.dampingFactor = 0.08;
+orbitControls.target.set(0, 50, 0);
+orbitControls.update();
+
+// ============================================================
+// State
+// ============================================================
+let currentHex = '#0044ff';
+let currentSpace = 'lab-d65';
+let displayMode = 'steps';   // 'smooth' or 'steps'
+let pointSize = 1.5;
+let pointAlpha = 0.35;
+let currentPoints = null;
+
+// Curve scene objects
+const curveGroup = new THREE.Group();
+scene.add(curveGroup);
+
+// ============================================================
+// Custom shader for point cloud (from Gamut Viewer)
+// ============================================================
+const pointVertexShader = `
+  attribute float pointAlpha;
+  varying vec3 vColor;
+  varying float vAlpha;
+  uniform float uSize;
+  uniform float uScale;
+  void main() {
+    vColor = color;
+    vAlpha = pointAlpha;
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = uSize * (uScale / -mvPos.z);
+    gl_Position = projectionMatrix * mvPos;
+  }
+`;
+const pointFragmentShader = `
+  varying vec3 vColor;
+  varying float vAlpha;
+  uniform float uOpacity;
+  void main() {
+    float a = vAlpha * uOpacity;
+    if (a < 0.01) discard;
+    gl_FragColor = vec4(vColor, a);
+  }
+`;
+
+// ============================================================
+// CSV parser and point cloud (simplified from Gamut Viewer)
+// ============================================================
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  const header = lines[0].split(',');
+  const iL = header.indexOf('L');
+  const ia = header.indexOf('a');
+  const ib = header.indexOf('b');
+  const iHex = header.indexOf('hex_srgb');
+
+  const count = lines.length - 1;
+  const labValues = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const tmpColor = new THREE.Color();
+
+  for (let i = 1; i <= count; i++) {
+    const cols = lines[i].split(',');
+    const L = parseFloat(cols[iL]);
+    const a = parseFloat(cols[ia]);
+    const b = parseFloat(cols[ib]);
+    const hex = cols[iHex];
+
+    const idx = (i - 1) * 3;
+    labValues[idx]     = L;
+    labValues[idx + 1] = a;
+    labValues[idx + 2] = b;
+
+    tmpColor.set(hex);
+    colors[idx]     = tmpColor.r;
+    colors[idx + 1] = tmpColor.g;
+    colors[idx + 2] = tmpColor.b;
+  }
+
+  return { labValues, colors, count };
+}
+
+function getUScale() {
+  return renderer.getPixelRatio() * window.innerHeight * 0.5;
+}
+
+function buildPointCloud(data) {
+  if (currentPoints) {
+    scene.remove(currentPoints);
+    currentPoints.geometry.dispose();
+    currentPoints.material.dispose();
+  }
+
+  const positions = new Float32Array(data.count * 3);
+  for (let i = 0; i < data.count; i++) {
+    const idx = i * 3;
+    // x = a*, y = L*, z = b*
+    positions[idx]     = data.labValues[idx + 1];  // a*
+    positions[idx + 1] = data.labValues[idx];      // L*
+    positions[idx + 2] = data.labValues[idx + 2];  // b*
+  }
+
+  const alphas = new Float32Array(data.count);
+  alphas.fill(1.0);
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+  geometry.setAttribute('pointAlpha', new THREE.BufferAttribute(alphas, 1));
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uSize: { value: pointSize },
+      uScale: { value: getUScale() },
+      uOpacity: { value: pointAlpha },
+    },
+    vertexShader: pointVertexShader,
+    fragmentShader: pointFragmentShader,
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+  });
+
+  currentPoints = new THREE.Points(geometry, material);
+  scene.add(currentPoints);
+}
+
+// ============================================================
+// Lab axes and grid (from Gamut Viewer)
+// ============================================================
+function makeAxisLabel(text, fontSize) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  div.style.cssText = `color:#fff; font-size:${fontSize || 13}px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-weight:600; text-shadow:0 0 4px rgba(0,0,0,0.8);`;
+  return new CSS2DObject(div);
+}
+
+function makeTickLabel(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  div.style.cssText = 'color:#999; font-size:10px; font-family:-apple-system,BlinkMacSystemFont,sans-serif; text-shadow:0 0 3px rgba(0,0,0,0.8);';
+  return new CSS2DObject(div);
+}
+
+function buildLabAxes() {
+  const group = new THREE.Group();
+  const axisMat = new THREE.LineBasicMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.6 });
+
+  // L* axis (vertical, y = 0..100)
+  const lGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 100, 0)
+  ]);
+  group.add(new THREE.Line(lGeom, axisMat));
+
+  const lLabel = makeAxisLabel('L*');
+  lLabel.position.set(0, 105, 0);
+  group.add(lLabel);
+
+  // a* axis (x = -128..127, at y=0)
+  const aGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-128, 0, 0), new THREE.Vector3(127, 0, 0)
+  ]);
+  group.add(new THREE.Line(aGeom, axisMat));
+  const aLabel = makeAxisLabel('a*');
+  aLabel.position.set(135, 0, 0);
+  group.add(aLabel);
+  const aNegLabel = makeAxisLabel('\u2212a*', 11);
+  aNegLabel.position.set(-138, 0, 0);
+  group.add(aNegLabel);
+
+  // b* axis (z = -128..127, at y=0)
+  const bGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, -128), new THREE.Vector3(0, 0, 127)
+  ]);
+  group.add(new THREE.Line(bGeom, axisMat));
+  const bLabel = makeAxisLabel('b*');
+  bLabel.position.set(0, 0, 135);
+  group.add(bLabel);
+  const bNegLabel = makeAxisLabel('\u2212b*', 11);
+  bNegLabel.position.set(0, 0, -138);
+  group.add(bNegLabel);
+
+  // Tick marks on L*
+  for (const v of [0, 25, 50, 75, 100]) {
+    const tick = makeTickLabel(String(v));
+    tick.position.set(-5, v, 0);
+    group.add(tick);
+  }
+
+  // Ground grid on the a*-b* plane (y=0)
+  const gridExtent = 125;
+  const gridStep = 25;
+  const gridPoints = [];
+  for (let v = -gridExtent; v <= gridExtent; v += gridStep) {
+    gridPoints.push(-gridExtent, 0, v, gridExtent, 0, v);
+    gridPoints.push(v, 0, -gridExtent, v, 0, gridExtent);
+  }
+  const gridGeom = new THREE.BufferGeometry();
+  gridGeom.setAttribute('position', new THREE.Float32BufferAttribute(gridPoints, 3));
+  const gridMat = new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.15 });
+  group.add(new THREE.LineSegments(gridGeom, gridMat));
+
+  return group;
+}
+
+scene.add(buildLabAxes());
+
+// ============================================================
+// Interpolation engine
+// ============================================================
+function computePath(hexColor, tweenSpace, targetHex, numSteps) {
+  const c1 = new Color(hexColor);
+  const c2 = new Color(targetHex);
+  const range = Color.range(c1, c2, { space: tweenSpace });
+  const points = [];
+
+  for (let i = 0; i < numSteps; i++) {
+    const t = numSteps === 1 ? 0 : i / (numSteps - 1);
+    const sample = range(t);
+
+    // Convert to CIE L*a*b* (D65)
+    const lab = sample.to('lab-d65');
+    const L = lab.get('l');
+    const a = lab.get('a');
+    const b = lab.get('b');
+
+    // Get sRGB hex (clamped)
+    let hex;
+    try {
+      hex = sample.to('srgb').toString({ format: 'hex' });
+      // Color.js may return functional notation if out of gamut
+      if (!hex.startsWith('#')) {
+        const clamped = sample.to('srgb').toGamut({ space: 'srgb' });
+        hex = clamped.toString({ format: 'hex' });
+      }
+    } catch {
+      hex = '#888888';
+    }
+
+    points.push({ L, a, b, hex, t });
+  }
+
+  return points;
+}
+
+// ============================================================
+// Curve rendering
+// ============================================================
+function clearCurves() {
+  while (curveGroup.children.length > 0) {
+    const child = curveGroup.children[0];
+    curveGroup.remove(child);
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) {
+      if (child.material.dispose) child.material.dispose();
+    }
+    // Recurse into groups
+    if (child.children) {
+      child.traverse(obj => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material && obj.material.dispose) obj.material.dispose();
+      });
+    }
+  }
+}
+
+function hexToRgbArray(hex) {
+  const c = new THREE.Color(hex);
+  return [c.r, c.g, c.b];
+}
+
+function addMarkerSphere(L, a, b, hex, radius) {
+  const geom = new THREE.SphereGeometry(radius, 24, 18);
+  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(hex) });
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.position.set(a, L, b);  // x=a*, y=L*, z=b*
+  curveGroup.add(mesh);
+}
+
+function buildSmoothCurve(points) {
+  if (points.length < 2) return;
+
+  const positions = [];
+  const colors = [];
+
+  for (const p of points) {
+    positions.push(p.a, p.L, p.b);
+    const [r, g, b] = hexToRgbArray(p.hex);
+    colors.push(r, g, b);
+  }
+
+  const geom = new LineGeometry();
+  geom.setPositions(positions);
+  geom.setColors(colors);
+
+  const mat = new LineMaterial({
+    linewidth: 3,
+    vertexColors: true,
+    worldUnits: false,  // pixel units
+    transparent: true,
+    opacity: 1.0,
+    depthWrite: true,
+  });
+  mat.resolution.set(innerWidth, innerHeight);
+
+  const line = new Line2(geom, mat);
+  line.computeLineDistances();
+  curveGroup.add(line);
+}
+
+function buildStepCurve(points) {
+  if (points.length < 2) return;
+
+  // Connecting line (thin)
+  const linePositions = [];
+  for (const p of points) {
+    linePositions.push(p.a, p.L, p.b);
+  }
+  const lineGeom = new THREE.BufferGeometry();
+  lineGeom.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+  const lineMat = new THREE.LineBasicMaterial({
+    color: 0xffffff, transparent: true, opacity: 0.4,
+  });
+  curveGroup.add(new THREE.Line(lineGeom, lineMat));
+
+  // Spheres at each stop
+  for (const p of points) {
+    addMarkerSphere(p.L, p.a, p.b, p.hex, 1.5);
+  }
+}
+
+function computeFullScale() {
+  const TARGET_L = [
+    100, 97.5, 95, 92.5, 90, 85, 80, 75, 70, 65,
+    60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5, 0
+  ];
+
+  const pickedLab = new Color(currentHex).to('lab-d65');
+  const pickedL = pickedLab.get('l');
+  let colorIdx = 0;
+  let minDist = Infinity;
+  for (let i = 0; i < TARGET_L.length; i++) {
+    const d = Math.abs(TARGET_L[i] - pickedL);
+    if (d < minDist) { minDist = d; colorIdx = i; }
+  }
+
+  const tintCount = colorIdx + 1;
+  const tintPath = tintCount > 1
+    ? computePath('#ffffff', currentSpace, currentHex, tintCount)
+    : [computePath('#ffffff', currentSpace, currentHex, 1)[0]];
+
+  const shadeCount = STEP_COUNT - colorIdx;
+  const shadePath = shadeCount > 1
+    ? computePath(currentHex, currentSpace, '#000000', shadeCount)
+    : [computePath(currentHex, currentSpace, '#000000', 1)[0]];
+
+  return {
+    points: [...tintPath, ...shadePath.slice(1)],
+    colorIdx,
+    pickedL,
+    pickedA: pickedLab.get('a'),
+    pickedB: pickedLab.get('b'),
+  };
+}
+
+function rebuildCurves() {
+  clearCurves();
+
+  if (displayMode === 'smooth') {
+    // Smooth: two separate curves (color→white, color→black)
+    const toWhite = computePath(currentHex, currentSpace, '#ffffff', SMOOTH_COUNT);
+    const toBlack = computePath(currentHex, currentSpace, '#000000', SMOOTH_COUNT);
+    buildSmoothCurve(toWhite);
+    buildSmoothCurve(toBlack);
+  } else {
+    // 23-Step: single unified path (white→color→black), 23 total
+    const scale = computeFullScale();
+    buildStepCurve(scale.points);
+  }
+
+  // Marker spheres: picked color, white point, black point
+  const pickedLab = new Color(currentHex).to('lab-d65');
+  const pL = pickedLab.get('l'), pa = pickedLab.get('a'), pb = pickedLab.get('b');
+  addMarkerSphere(pL, pa, pb, currentHex, 3);
+  addMarkerSphere(100, 0, 0, '#ffffff', 2.5);
+  addMarkerSphere(0, 0, 0, '#333333', 2.5);
+
+  // Update Lab readout
+  document.getElementById('lab-readout').textContent =
+    `L*=${pL.toFixed(1)}  a*=${pa.toFixed(1)}  b*=${pb.toFixed(1)}`;
+
+  // Update scale strip (always shows 23-step, regardless of display mode)
+  updateScaleStrip();
+}
+
+function updateScaleStrip() {
+  const strip = document.getElementById('scale-strip');
+  strip.innerHTML = '';
+
+  const { points: fullScale, colorIdx } = computeFullScale();
+
+  // Label
+  const label = document.createElement('div');
+  label.className = 'strip-label';
+  label.textContent = 'scale';
+  strip.appendChild(label);
+
+  // Weight labels row
+  const topRow = document.createElement('div');
+  topRow.className = 'weight-row';
+  for (let i = 0; i < STEP_COUNT; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'weight-label top';
+    cell.textContent = WEIGHT_NAMES[i];
+    topRow.appendChild(cell);
+  }
+  strip.appendChild(topRow);
+
+  // Swatch row
+  const swatchRow = document.createElement('div');
+  swatchRow.className = 'weight-row';
+  for (let i = 0; i < STEP_COUNT; i++) {
+    const swatch = document.createElement('div');
+    swatch.className = 'weight-swatch';
+    swatch.style.background = fullScale[i].hex;
+    swatch.title = `${WEIGHT_NAMES[i]}: ${fullScale[i].hex}\nL*=${fullScale[i].L.toFixed(1)}`;
+    if (i === colorIdx) {
+      swatch.style.outline = '2px solid #fff';
+      swatch.style.outlineOffset = '-2px';
+      swatch.style.position = 'relative';
+      swatch.style.zIndex = '1';
+    }
+    swatchRow.appendChild(swatch);
+  }
+  strip.appendChild(swatchRow);
+}
+
+// ============================================================
+// UI wiring
+// ============================================================
+const colorPicker = document.getElementById('color-picker');
+const hexInput = document.getElementById('hex-input');
+const spaceSelect = document.getElementById('space-select');
+
+function setColor(hex) {
+  currentHex = hex;
+  colorPicker.value = hex;
+  hexInput.value = hex;
+  rebuildCurves();
+}
+
+colorPicker.addEventListener('input', () => {
+  currentHex = colorPicker.value;
+  hexInput.value = currentHex;
+  rebuildCurves();
+});
+
+hexInput.addEventListener('change', () => {
+  let val = hexInput.value.trim();
+  if (!val.startsWith('#')) val = '#' + val;
+  if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+    setColor(val);
+  } else {
+    hexInput.value = currentHex;
+  }
+});
+
+// Suggested colors
+document.querySelectorAll('#suggested .swatch').forEach(el => {
+  el.addEventListener('click', () => setColor(el.dataset.hex));
+});
+
+// Tween space
+spaceSelect.addEventListener('change', () => {
+  currentSpace = spaceSelect.value;
+  rebuildCurves();
+});
+
+// Display mode
+document.querySelectorAll('.mode-buttons button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelector('.mode-buttons button.active').classList.remove('active');
+    btn.classList.add('active');
+    displayMode = btn.dataset.mode;
+    rebuildCurves();
+  });
+});
+
+// Point size
+const sizeSlider = document.getElementById('size-slider');
+const sizeVal = document.getElementById('size-val');
+sizeSlider.addEventListener('input', () => {
+  pointSize = parseFloat(sizeSlider.value);
+  sizeVal.textContent = pointSize.toFixed(1);
+  if (currentPoints) currentPoints.material.uniforms.uSize.value = pointSize;
+});
+
+// Point opacity
+const alphaSlider = document.getElementById('alpha-slider');
+const alphaVal = document.getElementById('alpha-val');
+alphaSlider.addEventListener('input', () => {
+  pointAlpha = parseFloat(alphaSlider.value);
+  alphaVal.textContent = pointAlpha.toFixed(2);
+  if (currentPoints) {
+    currentPoints.material.uniforms.uOpacity.value = pointAlpha;
+  }
+});
+
+// ============================================================
+// Camera info
+// ============================================================
+const camInfo = document.getElementById('cam-pos');
+function updateCamInfo() {
+  const p = camera.position;
+  const d = p.length();
+  const elev = Math.asin(p.y / d) * (180 / Math.PI);
+  const azim = Math.atan2(p.x, p.z) * (180 / Math.PI);
+  camInfo.textContent = `elev ${elev.toFixed(0)}\u00B0 azim ${azim.toFixed(0)}\u00B0 dist ${d.toFixed(0)}`;
+}
+
+// ============================================================
+// Resize
+// ============================================================
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  labelRenderer.setSize(innerWidth, innerHeight);
+  if (currentPoints) {
+    currentPoints.material.uniforms.uScale.value = getUScale();
+  }
+  // Update Line2 resolution
+  curveGroup.traverse(obj => {
+    if (obj.material && obj.material.resolution) {
+      obj.material.resolution.set(innerWidth, innerHeight);
+    }
+  });
+});
+
+// ============================================================
+// Animate
+// ============================================================
+function animate() {
+  requestAnimationFrame(animate);
+  orbitControls.update();
+  updateCamInfo();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+
+// ============================================================
+// Download CSV
+// ============================================================
+document.getElementById('download-btn').addEventListener('click', () => {
+  const { points, colorIdx } = computeFullScale();
+  const spaceLabel = TWEEN_SPACES.find(s => s.key === currentSpace)?.label || currentSpace;
+
+  const rows = [['weight', 'hex', 'L_d65', 'a_d65', 'b_d65', 'L_d50', 'a_d50', 'b_d50']];
+
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    // D65 values already computed
+    const L65 = p.L.toFixed(4);
+    const a65 = p.a.toFixed(4);
+    const b65 = p.b.toFixed(4);
+
+    // Convert to D50 via Color.js
+    const c = new Color('lab-d65', [p.L, p.a, p.b]);
+    const d50 = c.to('lab');
+    const L50 = d50.get('l').toFixed(4);
+    const a50 = d50.get('a').toFixed(4);
+    const b50 = d50.get('b').toFixed(4);
+
+    rows.push([WEIGHT_NAMES[i], p.hex, L65, a65, b65, L50, a50, b50]);
+  }
+
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const safeHex = currentHex.replace('#', '');
+  a.download = `scale_${safeHex}_${currentSpace}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// ============================================================
+// Info panel toggle
+// ============================================================
+document.getElementById('info-toggle').addEventListener('click', () => {
+  document.getElementById('info-panel').classList.toggle('visible');
+});
+
+// ============================================================
+// Boot
+// ============================================================
+const resp = await fetch('./data/obvious.csv');
+const text = await resp.text();
+const data = parseCSV(text);
+buildPointCloud(data);
+rebuildCurves();
+animate();
+</script>
+</body>
+</html>
