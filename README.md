@@ -42,6 +42,27 @@ python3 launch/census-runner.py ultrafine     # deep run (~5-10 hours)
 
 Watch the dashboard at `:8084` as it discovers colors in real time. When it finishes, your results are written to `data/jnd.csv`, `data/acceptability.csv`, and `data/obvious.csv` — the viewer picks them up automatically.
 
+## Gamut Viewer
+
+The 3D viewer renders every distinguishable color as a point in CIELAB perceptual color space — the coordinate system color scientists use because equal distances correspond to equal perceptual differences.
+
+**Axes:**
+- **L*** (vertical): Lightness, 0 (black) → 100 (white)
+- **a*** (left–right): Green (−) → Red (+)
+- **b*** (front–back): Blue (−) → Yellow (+)
+
+Each dot is one color from the census, rendered in its actual color. The shape you see — a lumpy, asymmetric blob — is the human visual gamut: the full set of colors a person can distinguish under that tier's threshold.
+
+**Controls:**
+- Drag to orbit, scroll to zoom, right-drag to pan
+- Switch between three perceptual tiers (JND / Acceptability / Obvious) to see how the cloud thins as the threshold widens
+- Toggle between CIELAB and CIE xyY coordinate systems
+- Overlay industry gamut boundaries (sRGB, Adobe RGB, Display P3) as transparent meshes to see how much of human vision each standard covers
+- Clip the point cloud to a selected gamut to isolate just the colors a given display can reproduce
+- Adjust point size and opacity for dense regions
+
+**What you're looking at:** At the JND tier, ~325k dots fill the space. Switch to Obvious and only ~18k remain — the 95% that vanished are colors the eye can technically tell apart but that nobody would notice in practice.
+
 ## Results
 
 | Tier | ΔE2000 | Count | What it means |
